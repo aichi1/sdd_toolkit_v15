@@ -1,0 +1,66 @@
+{
+  "$comment": "spec_check.py が読む唯一の許可リスト。docs/spec-check-allowlist.md は人間向けの説明であり、パーサは読まない。Markdown は説明用の表・例示・却下した候補と本物の許可を区別できないため（Phase 07 の Critical #13 / #16 / #17 / #19）。",
+  "$usage": "**ここに残っているのはツールキット本体に由来するエントリだけ**である。新しいプロジェクトを `/init-task` で作ったあと `python3 scripts/spec_check.py` を実行し、「実在しない参照」が報告されたら (a) 本当の誤りなら文書を直す (b) 意図的な参照（課題の記録・却下した候補・これから作るファイル）なら entries に 1 件足して reason を書く。**reason が空のエントリは無効**。前方参照（これから作るもの）は実物を作った時点で削除する。",
+  "schema": {
+    "ref": "コマンド名（先頭の / は不要）またはファイルパス",
+    "scope": "'*' または対象パス（パス境界で照合）",
+    "reason": "必須。なぜ許可するのか。空なら無効",
+    "section": "人間向けの分類（パーサは使わない）"
+  },
+  "entries": [
+    {
+      "ref": "recap",
+      "scope": "docs/rules-reference/session-guidelines-detail.md",
+      "reason": "C-19 の発見元。文書冒頭で未実装と明記済み",
+      "section": "形式"
+    },
+    {
+      "ref": "quick-sync",
+      "scope": "docs/rules-reference/session-guidelines-detail.md",
+      "reason": "構想。未実装であることを同ファイル冒頭と各手順に明記済み",
+      "section": "形式"
+    },
+    {
+      "ref": "suggest-next",
+      "scope": "docs/rules-reference/session-guidelines-detail.md",
+      "reason": "同上",
+      "section": "形式"
+    },
+    {
+      "ref": "health-check",
+      "scope": "docs/rules-reference/session-guidelines-detail.md",
+      "reason": "同上",
+      "section": "形式"
+    },
+    {
+      "ref": "xxx",
+      "scope": "*",
+      "reason": "記法上の穴埋め（「仕様が参照するコマンド（`/xxx`）」）",
+      "section": "形式"
+    },
+    {
+      "ref": "templates/intake/network_design.md",
+      "scope": "docs/future-categories.md",
+      "reason": "将来カテゴリの構想。着手未定",
+      "section": "形式"
+    },
+    {
+      "ref": "templates/skills/network_design.md",
+      "scope": "docs/future-categories.md",
+      "reason": "同上",
+      "section": "形式"
+    },
+    {
+      "ref": "run-phase/SKILL.md",
+      "scope": "*",
+      "reason": ".claude/skills/run-phase/SKILL.md` の略記",
+      "section": "略記（実在するファイルへの短い書き方）"
+    },
+    {
+      "ref": "add-feature/SKILL.md",
+      "scope": "*",
+      "reason": ".claude/skills/add-feature/SKILL.md` の略記",
+      "section": "略記（実在するファイルへの短い書き方）"
+    }
+  ]
+}

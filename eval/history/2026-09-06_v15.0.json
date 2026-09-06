@@ -1,0 +1,226 @@
+{
+  "iteration_id": "v15.0",
+  "date": "2026-09-06",
+  "commit": "",
+  "scenarios": {
+    "T1_research": {
+      "iteration_id": "v15.0",
+      "scenario": "T1_research",
+      "date": "2026-09-06",
+      "scores": {
+        "correctness": 5,
+        "completeness": 4,
+        "efficiency": 4,
+        "robustness": 4,
+        "maintainability": 5,
+        "usability": 4,
+        "safety": 4
+      },
+      "checklist_grade": "A",
+      "checklist": [
+        {
+          "id": "R1",
+          "status": "pass",
+          "evidence": "v14.0 から不変。templates/skills/research_report.md 必須セクション1（TL;DR）。Iteration 3 はテンプレートを変更していない（`git diff --stat 22ba296..HEAD -- templates/` で確認。差分は spec-quality-criteria.md フラグメントの2行のみ）"
+        },
+        {
+          "id": "R2",
+          "status": "pass",
+          "evidence": "v14.0 から不変。同 必須セクション2（比較軸の定義と選定理由）"
+        },
+        {
+          "id": "R3",
+          "status": "pass",
+          "evidence": "v14.0 から不変。同 必須セクション7（出典・参考文献）"
+        },
+        {
+          "id": "R4",
+          "status": "pass",
+          "evidence": "v14.0 から不変。同 必須セクション5（不確実性・留意点）"
+        }
+      ],
+      "metrics": {
+        "manifest_fill_rate": 1.0,
+        "turns": 2,
+        "retries": 0,
+        "tool_calls": 1,
+        "duration_ms": 50811,
+        "cost_usd": 0.0678521,
+        "trajectory_source": "eval/runner.py --scenario T1_research --iteration v15.0 --model haiku --live（session_id 81cac2a3-7e34-49a3-bbaf-ced9d9d17556）。eval/summary_trajectory.csv に記録",
+        "verification_commands_executed": 0,
+        "verification_commands_executed_note": "research_report は実行可能な検証コマンドを持たないカテゴリ。v14.0 と同じ扱い（該当なしとして明示。docs/io-spec.md §2.4）",
+        "trace_check_defects": 0,
+        "spec_check_defects": 0,
+        "hooks_exit0_on_malformed_input": "4/4（v14.0 から不変。Iteration 3 は hooks/*.py を変更していない）"
+      },
+      "evidence_files": [
+        "outputs/phase-11/change-report.md",
+        "outputs/phase-12/change-report.md",
+        "outputs/phase-13/change-report.md",
+        "outputs/phase-14/change-report.md",
+        "docs/tech-stack.md §7（コマンドとスキルの責務分界）",
+        "scripts/trace_check.py",
+        "scripts/spec_check.py",
+        "scripts/check_fix_cycle.py",
+        "scripts/check_constitution.py",
+        "docs/spec-check-allowlist.json",
+        "eval/runner.py",
+        "eval/summary_trajectory.csv",
+        ".claude/settings.json",
+        "README.md",
+        "docs/CHANGELOG.md",
+        "eval/reports/2026-09-06_v14.0.md §4"
+      ],
+      "notes": "【correctness 5 据え置き（上限）】v14.0 で既にアンカー5に達しており、Iteration 3 は correctness を対象とした仮説を立てていない（対象は仮説2 maintainability・仮説3 safety・仮説4 C-52・S-15 efficiency のみ）。C-52 の解消（Phase 12）は検査基盤自体の信頼性向上であり、correctness の判定条件（trace_check.py / spec_check.py の実測、いずれも本フェーズで再実行し欠陥0件を確認）に変化はないため据え置く。【completeness 4 据え置き】対象テンプレートは Iteration 3 で変更なし。【efficiency 4 据え置き（S-15: 実測値に基づく判定）】本フェーズで `eval/runner.py --live` を実際に実行し、turns=2 / retries=0 / tool_calls=1 を実測した（`unknown` から脱却。S-15 達成）。この値だけを見ればアンカー5（retries 0、無駄な手順なし）に該当しうるが、同じ T1_research シナリオで Phase 11 が残した過去の実測4サンプル（`eval/summary_trajectory.csv` の `v15.0-smoketest-phase11` 行）には retries=2 の回と、呼び出し自体が失敗した `source=error` の回（5サンプル中1回、約20%）が含まれており、単発の成功だけでアンカー5（『稀』であるべき最高点）へ引き上げる根拠としては不十分と判断した。実測値に基づき『4のまま据え置く』と決めた（Common Pitfall: 実測できるようになったからといって機械的に5へ引き上げない）。【robustness 4 据え置き】`.claude/settings.json` と hooks はIteration 3を通じて無変更（各フェーズ change-report.md §5 で確認済み）。Phase 12 の fail-safe強化（check_fix_cycle.py 等）はrobustnessの観点でも前進だが、v15.0 の事前コミットメント（仮説2/3/4 + S-15）に robustness は含まれておらず、対象外の軸を機会的に引き上げない方針（『点を上げる条件を先に決める』README §5）に従い据え置く。【maintainability 4→5（仮説2達成）】(1) 新コマンド追加が1ファイルで済むことを Phase 13 が `/metrics`（`.claude/skills/metrics/SKILL.md` 新設1ファイルのみ、`git diff --stat` で確認済み）で実証済み (2) 追加条件（`trace_check.py` が新構造に対応し `pytest` が退行しないこと）を本フェーズで実行して確認した：`python3 scripts/trace_check.py` → 要件34件検査・欠陥0件、`python3 scripts/spec_check.py` → 欠陥0件、`python3 -m pytest scripts/ -q` → 284 passed（Phase 14 と同数、回帰なし）。2条件とも実測で満たしたためアンカー5（拡張点が明確、重複が抑制され、変更影響が限定される）に引き上げた。【usability 4 据え置き】README は Phase 10/13 のパターンを踏襲し `.claude/skills/*/SKILL.md` 16件とコマンド一覧が完全一致（本フェーズで確認・v15表記に更新）。C-28 の二層重複は Phase 13 で解消済みだが、アンカー5『迷いにくい』への到達を独立に裏付ける新規証拠（利用者フィードバック等）がないため4のまま。【safety 4 据え置き】T1 は文書カテゴリで Validator の Bash 行使が本質的ではないため、T2 の安全性検討（仮説3）はここでは該当しない。settings.json は不変（allow 38 / deny 40 / ask 18）。S-02 の非減少条件を自明に満たす。"
+    },
+    "T2_implement": {
+      "iteration_id": "v15.0",
+      "scenario": "T2_implement",
+      "date": "2026-09-06",
+      "scores": {
+        "correctness": 5,
+        "completeness": 4,
+        "efficiency": 4,
+        "robustness": 5,
+        "maintainability": 5,
+        "usability": 4,
+        "safety": 3
+      },
+      "checklist_grade": "A",
+      "checklist": [
+        {
+          "id": "I1",
+          "status": "pass",
+          "evidence": "v14.0 から不変。templates/skills/small_implementation.md の README 必須 5 セクション"
+        },
+        {
+          "id": "I2",
+          "status": "pass",
+          "evidence": "v14.0 から不変。同 Quality Criteria 第2項（入力エラー・例外の扱い）"
+        },
+        {
+          "id": "I3",
+          "status": "pass",
+          "evidence": "v14.0 から不変。scripts/ 配下は pytest で自動テストされる。本フェーズで pytest は 284 件で不変（Phase 14 と同数。回帰なし）"
+        },
+        {
+          "id": "I4",
+          "status": "pass",
+          "evidence": "v14.0 から不変。同『ソースコードの構成指針』"
+        }
+      ],
+      "metrics": {
+        "manifest_fill_rate": 1.0,
+        "turns": 2,
+        "retries": 0,
+        "tool_calls": 1,
+        "duration_ms": 51270,
+        "cost_usd": 0.0669595,
+        "trajectory_source": "eval/runner.py --scenario T2_implement --iteration v15.0 --model haiku --live（session_id 43441ea4-cbaf-40cb-b90e-a0e88e78fa93）。eval/summary_trajectory.csv に記録",
+        "verification_commands_executed": ">0",
+        "verification_commands_executed_note": "v14.0 から不変。Validator は Phase 06 以降も scripts/*.py の変更を独立に再実行する（第3条 改正(2)、C-49）。本フェーズは Validator が Step 2.1.5 の新設ハッシュ照合手順（M5）を実際に使う対象フェーズでもある",
+        "trace_check_defects": 0,
+        "spec_check_defects": 0,
+        "controlled_experiment": "v13.0 の対照実験（outputs/phase-03/dryrun, dryrun-fail）は変更されておらず結果も不変",
+        "hooks_exit0_on_malformed_input": "4/4（v14.0 から不変）"
+      },
+      "evidence_files": [
+        "outputs/phase-11/change-report.md",
+        "outputs/phase-12/change-report.md",
+        "outputs/phase-13/change-report.md",
+        "outputs/phase-14/change-report.md",
+        "scripts/trace_check.py",
+        "scripts/spec_check.py",
+        "scripts/check_constitution.py",
+        "scripts/check_fix_cycle.py",
+        ".claude/agents/validator.md",
+        ".claude/settings.json",
+        ".claude/skills/run-phase/SKILL.md",
+        "docs/tech-stack.md §5",
+        "outputs/phase-03/dryrun/.validation/report.md",
+        "outputs/phase-03/dryrun-fail/.validation/report.md",
+        "eval/reports/2026-09-06_v14.0.md §4"
+      ],
+      "notes": "【correctness 5 据え置き（上限）】T1 と同根拠。仮説2/3/4 の対象ではなく、C-52 解消は検査基盤の信頼性向上であって correctness の判定条件（trace_check.py/spec_check.py の実測。本フェーズで再実行し欠陥0件を確認）自体に変化はない。【completeness/efficiency 4 据え置き】T1 と同根拠。turns=2/retries=0 を実測したが、単発サンプルのためアンカー5への引き上げ根拠としては不十分と判断し4のまま。【robustness 5 据え置き（上限）】v13.0 で既に上限に達している。Iteration 3 で追加された fail-safe 設計（check_fix_cycle.py の打ち切り規則・Gate帰属検査、check_constitution.py の構造化フィールド移行）はさらに積み重ねだが、尺度の上限に達しているため据え置き。【maintainability 4→5（仮説2達成）】T1 と同根拠。追加観点として T2 は Validator が実際に検証コマンドを実行するシナリオであり、`python3 -m pytest scripts/ -q`（284 passed、Phase 14 と同数）と `python3 scripts/trace_check.py` / `python3 scripts/spec_check.py`（いずれも欠陥0件）を本フェーズで実行して確認した。C-28 の一本化（Phase 13）後もこれらの検査基盤が正しく機能し続けていることを実測し、アンカー5「変更影響が限定される」を裏付けた。【usability 4 据え置き】T1 と同根拠。【safety 3 据え置き（仮説3: T2 3→4 未達）】v15.0 の判定基準（`eval/reports/2026-09-06_v14.0.md` §4 仮説3、訂正2 反映後）は3条件——(1) Bash 経由の書き込みが技術的に塞がれること (2) M3（permissions のエージェント単位化。not_achievable なら残り2条件で判定） (3) M5（ハッシュ照合の run-phase 組み込み）。本フェーズで条件1を隔離した一時ディレクトリでの実測により調査した：`--agents` JSON の `tools`/`disallowedTools` パターン構文（例 `Bash(ls *)` のみを許可）および CLI `--allowedTools`/`--disallowedTools` の Bash パターン、さらに `--settings` の `permissions.deny` に至るまで、いずれも単一トレイリングワイルドカードのプレフィックス一致であり、パターン外の完全に無関係なコマンド（例 `echo MODIFIED > protected.txt`）が **denyされずに実行され、実際にファイルが書き換わることを複数回の実行で確認した**（対照実験として `--disallowedTools Bash`〔ツール全体の名前一致〕は正しくブロックされることも確認済み——ツール名の完全一致は機能するが、コマンド内容のパターンによる部分的な制限は技術的に機能していない）。技術的にBash書き込みだけを選択的に塞ぐ手段は本バージョン（2.1.263）のエージェント定義／CLIフラグには存在しないと実測で確定したため、**条件1は達成できず、T2は3のまま据え置く**（『調査した』こと自体を昇点根拠にしない。訂正2が禁じた代替合格経路と同じ誤りを避けるため）。条件2（M3）は Phase 11 の実測どおり未解消（実態は permissions がエージェント単位でないこと）。条件3（M5）は Phase 14 で `run-phase` Step 2.1.5 に組み込み済みで、本フェーズの Validator 自身がこの手順で実際にハッシュ照合を行うことで実証される（Builder は手順の新設事実のみを記録し、実行結果は Validator の検証レポートに委ねる）。条件1が未達のため総合判定として T2 は4へ昇点しない。S-02 の非減少条件（v14.0 以上）は自明に満たす。"
+    },
+    "T3_proposal": {
+      "iteration_id": "v15.0",
+      "scenario": "T3_proposal",
+      "date": "2026-09-06",
+      "scores": {
+        "correctness": 5,
+        "completeness": 4,
+        "efficiency": 4,
+        "robustness": 4,
+        "maintainability": 5,
+        "usability": 4,
+        "safety": 4
+      },
+      "checklist_grade": "A",
+      "checklist": [
+        {
+          "id": "P1",
+          "status": "pass",
+          "evidence": "v14.0 から不変。templates/skills/internal_proposal.md Quality Criteria 第1項"
+        },
+        {
+          "id": "P2",
+          "status": "pass",
+          "evidence": "v14.0 から不変。同 第2項・第5項"
+        },
+        {
+          "id": "P3",
+          "status": "pass",
+          "evidence": "v14.0 から不変。同 第3項"
+        },
+        {
+          "id": "P4",
+          "status": "pass",
+          "evidence": "v14.0 から不変。同 第4項"
+        }
+      ],
+      "metrics": {
+        "manifest_fill_rate": 1.0,
+        "turns": 2,
+        "retries": 0,
+        "tool_calls": 1,
+        "duration_ms": 45172,
+        "cost_usd": 0.0540446,
+        "trajectory_source": "eval/runner.py --scenario T3_proposal --iteration v15.0 --model haiku --live（session_id 368c48e3-7780-4702-accd-aed33f4d4a63）。eval/summary_trajectory.csv に記録",
+        "verification_commands_executed": 0,
+        "verification_commands_executed_note": "internal_proposal は文書成果物であり実行可能な検証コマンドを持たない。v14.0 から不変の扱い",
+        "trace_check_defects": 0,
+        "spec_check_defects": 0,
+        "hooks_exit0_on_malformed_input": "4/4（v14.0 から不変）"
+      },
+      "evidence_files": [
+        "outputs/phase-11/change-report.md",
+        "outputs/phase-12/change-report.md",
+        "outputs/phase-13/change-report.md",
+        "outputs/phase-14/change-report.md",
+        "docs/requirements.md §4（C-56）",
+        "docs/plugin-decision.md",
+        "docs/team.md §4.5",
+        "docs/rules-reference/memory-policy.md",
+        "docs/convergence.md",
+        ".claude/settings.json",
+        "README.md",
+        "docs/CHANGELOG.md",
+        "eval/reports/2026-09-06_v14.0.md §4"
+      ],
+      "notes": "【correctness 5 据え置き（上限）】T1/T2 と同根拠。【completeness/efficiency 4 据え置き】T1 と同根拠。turns=2/retries=0 を実測（単発サンプルにつき4のまま）。【robustness 4 据え置き】T3 は検証コマンドを持たないカテゴリで T2 のような対照実験は成立しないため v14.0 と同じ4のまま。【maintainability 4→5（仮説2達成）】T1/T2 と同根拠。T3 に固有の追加観点として、本フェーズで新規作成した docs/roadmap.md（構想の置き場所）と outputs/phase-15/ablation-report.md（第7条アブレーション）により、『拡張点が明確』であることをプロジェクト運営面でも示した——新規ドキュメントの追加が既存の docs/ 構成（`docs/_manifest.json` 対象外の任意追加）に影響を与えず、`scripts/spec_check.py`（許可リストの前方参照解消後に実行し欠陥0件）で参照整合性を確認できた。【usability 4 据え置き】T1 と同根拠。README を v15 表記に更新し、CHANGELOG に `## v15` エントリを追加したことを本フェーズで確認した。【safety 4 据え置き】T3 は文書カテゴリで Validator の Bash 行使が本質的でないため、T2 で判定した仮説3（条件1: 技術的にBash書き込みを塞げないと実測確定）はここでは該当しない。settings.json は不変（allow 38 / deny 40 / ask 18）。S-02 の非減少条件を自明に満たす。"
+    }
+  },
+  "overall": {
+    "scores": {
+      "correctness": 5.0,
+      "completeness": 4.0,
+      "efficiency": 4.0,
+      "robustness": 4.333,
+      "maintainability": 5.0,
+      "usability": 4.0,
+      "safety": 3.667
+    },
+    "computed_by": "eval/aggregate.py"
+  }
+}

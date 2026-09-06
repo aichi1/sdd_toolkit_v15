@@ -1,0 +1,11 @@
+date,iteration_id,scenario,turns,retries,tool_calls,model,session_id,duration_ms,cost_usd,source
+2026-09-06,v15.0-smoketest-phase11,T1_research,1,0,0,haiku,3d908a4e-8d74-499e-93f3-ecb210a9c729,6544,0.021719500000000003,live
+2026-09-06,v15.0-smoketest-phase11,T1_research,unknown,unknown,unknown,haiku,unknown,unknown,unknown,error
+2026-09-06,v15.0-smoketest-phase11,T1_research,2,2,1,haiku,30cb0e78-d5c8-452f-9ca3-fdc701d81855,57615,0.0598524,live
+2026-09-06,v15.0-smoketest-phase11,T1_research,2,0,1,haiku,3cdb9f02-c240-4b0a-b5ad-e012072260aa,66450,0.0669185,live
+2026-09-06,v15.0,T1_research,2,0,1,haiku,81cac2a3-7e34-49a3-bbaf-ced9d9d17556,50811,0.0678521,live
+2026-09-06,v15.0,T2_implement,2,0,1,haiku,43441ea4-cbaf-40cb-b90e-a0e88e78fa93,51270,0.0669595,live
+2026-09-06,v15.0,T3_proposal,2,0,1,haiku,368c48e3-7780-4702-accd-aed33f4d4a63,45172,0.0540446,live
+2026-09-06,v15.0,T1_research,2,0,1,haiku,f2d3808e-dd03-4391-ac88-d7acb4f1c08b,62985,0.0675532,live
+2026-09-06,v15.0,T2_implement,2,0,1,haiku,4774fe20-dcfa-4889-911f-3411f94c12e1,53613,0.0664556,live
+2026-09-06,v15.0,T3_proposal,2,0,1,haiku,6bcc4106-df69-41e3-ae9f-a6e90676f4f8,42845,0.0509336,live

@@ -1,0 +1,14 @@
+* text=auto eol=lf
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.pdf binary
+*.pyc binary
+
+# パッチファイルは正規化しない（C-30 / Phase 02）
+# patch.diff は CRLF→LF 変換のハンクを含むため CR 自体が差分の内容である。
+# text=auto eol=lf で正規化するとハンクが壊れ、git apply --reverse が失敗する
+# （実測: 785,405 → 775,746 バイト。CR が 9,659 個失われた）。
+# 第2条（変更は必ず可逆である）の証跡そのものを壊すため、除外は必須。
+*.diff -text
+*.patch -text

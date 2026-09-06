@@ -1,0 +1,206 @@
+{
+  "iteration_id": "v13.0",
+  "date": "2026-09-04",
+  "commit": "",
+  "scenarios": {
+    "T1_research": {
+      "iteration_id": "v13.0",
+      "scenario": "T1_research",
+      "date": "2026-09-04",
+      "scores": {
+        "correctness": 4,
+        "completeness": 4,
+        "efficiency": 4,
+        "robustness": 4,
+        "maintainability": 4,
+        "usability": 4,
+        "safety": 4
+      },
+      "checklist_grade": "A",
+      "checklist": [
+        {
+          "id": "R1",
+          "status": "pass",
+          "evidence": "v12.0 から不変。templates/skills/research_report.md 必須セクション1（TL;DR）。Iteration 1 はテンプレートの必須セクションを変更していない"
+        },
+        {
+          "id": "R2",
+          "status": "pass",
+          "evidence": "v12.0 から不変。同 必須セクション2（比較軸の定義と選定理由）"
+        },
+        {
+          "id": "R3",
+          "status": "pass",
+          "evidence": "v12.0 から不変。同 必須セクション7（出典・参考文献）"
+        },
+        {
+          "id": "R4",
+          "status": "pass",
+          "evidence": "v12.0 から不変。同 必須セクション5（不確実性・留意点）"
+        }
+      ],
+      "metrics": {
+        "manifest_fill_rate": 1.0,
+        "turns": "unknown",
+        "retries": "unknown",
+        "verification_commands_executed": 0,
+        "verification_commands_executed_note": "research_report は実行可能な検証コマンドを持たないカテゴリ。**v12.0 との違いは、Phase 03 以降この 0 が「該当なし」として明示されること**（.claude/skills/run-phase/SKILL.md:230,238 / docs/io-spec.md:92）。v12.0 では C-06 により「実行できない 0」と「実行対象がない 0」が区別できなかった",
+        "hooks_exit0_on_malformed_input": "4/4（v12.0 は 2/4。C-39）"
+      },
+      "evidence_files": [
+        "outputs/phase-02/change-report.md",
+        "outputs/phase-03/change-report.md",
+        "outputs/phase-04/change-report.md",
+        "outputs/phase-05/iteration-1-summary.md",
+        ".claude/settings.json",
+        ".claude/agents/validator.md",
+        "README.md",
+        "docs/CHANGELOG.md",
+        "eval/reports/2026-09-03_v12.0.md",
+        ".claude/skills/run-phase/SKILL.md",
+        "docs/io-spec.md",
+        "scripts/test_hooks.py"
+      ],
+      "notes": "【据え置いた軸】correctness 4 / completeness 4 / efficiency 4。correctness は eval/reports/2026-09-03_v12.0.md §5 が「C-02 を解消しても expected_manifest は元々 100% 充足のため上がらない見込み。この軸で改善を主張しないこと」と**先に定めた**ため据え置く。C-02（旧カテゴリ名の矛盾）が Phase 02 で解消され「整合性」の観点では加点論もあるが、事前のコミットメントを守ることを優先した。Phase 14 のアブレーションで再検討する。completeness はテンプレートの必須セクションが不変で checklist_grade も A のまま。efficiency は Phase 03 の検証実行義務化で手数が増えた可能性があるが、v12.0 の metrics が turns/retries とも unknown で**比較の基準が存在しない**（K-03）。測定手段は Phase 11 で整備する。【robustness 3→4】v12.0 の減点要因は C-06（Validator が検証コマンドを一切実行できない。3 シナリオとも verification_commands_executed=0）。T1 は検証コマンドを持たないカテゴリのため実行能力そのものより「該当なし」と「省略」の区別が効く。Phase 03 がこれを必須化した。加えて C-39: 既存 hook 2 件が不正な stdin で exit=1 を返しセッションを止めていた（v12 から存在したが誰もテストしていなかった）。Phase 04 で 4/4 が exit=0 になり scripts/test_hooks.py が機械的に守る。アンカー 5（複数ケースに自然に対応）には届かない — 検証実行の対照実験は T2 でのみ成立するため。【maintainability 3→4】v12.0 の減点 5 件がすべて解消: C-18（CRLF 71 件→0）、C-01/C-24（README v6.1・CHANGELOG v6.5 停止→全面改訂と v7〜v12 復元）、C-20（create-deck を extras/ へ）、C-05（__pycache__ の追跡解除）、C-23（.git の Zone.Identifier 52 件を退避）。テスト 14→45 件。5 にしないのは C-28（/add-feature が .claude/commands/ と .claude/skills/ に重複し、Phase 04 で同じ停止条件を両方に書いたため乖離リスクが実在化）が残るため。「重複が抑制され」を満たさない。【usability 4】v12.0 の減点要因 C-01（README が v6.1 表記、11 コマンド中 3 つ未記載、ディレクトリ構成に docs/ eval/ scripts/ templates/ が欠落）は Phase 02 の全面改訂で解消。コマンド一覧は実ファイル 12 件と完全一致することを実測（/extras:create-deck を含む）。ただしアンカー 5「迷いにくい」は C-28 の二層構造が残るため据え置き 4。【safety 3→4】v12.0 の唯一の減点要因 C-04（sandbox.network.allowedDomains が ['*'] でネットワーク隔離が実質無効）を Phase 02 が 6 ドメインへ縮小して解消。加えて C-03（env の削除）、C-33（allow の `Bash(python3 scripts/*.py *)` ワイルドカードを 7 スクリプト列挙へ置換）。deny は初回コミット b52a405 から一貫して 40 で非減少（**v12.0 レポートの「38 項目」は誤り。実測 40**）。T1 は文書カテゴリで Validator の Bash が実際には行使されないため、§5 が課した「Bash 付与が新たな危険経路を作っていないことの実証」の懸念が該当しない。5 にしないのは H1（settings.json の permissions はセッション全体に適用されエージェント単位ではないため、validator.md の許可コマンド一覧は技術的強制ではない）と M3/M5 が未解決のため。"
+    },
+    "T2_implement": {
+      "iteration_id": "v13.0",
+      "scenario": "T2_implement",
+      "date": "2026-09-04",
+      "scores": {
+        "correctness": 4,
+        "completeness": 4,
+        "efficiency": 4,
+        "robustness": 5,
+        "maintainability": 4,
+        "usability": 4,
+        "safety": 3
+      },
+      "checklist_grade": "A",
+      "checklist": [
+        {
+          "id": "I1",
+          "status": "pass",
+          "evidence": "v12.0 から不変。templates/skills/small_implementation.md の README 必須 5 セクション"
+        },
+        {
+          "id": "I2",
+          "status": "pass",
+          "evidence": "v12.0 から不変。同 Quality Criteria 第2項（入力エラー・例外の扱い）"
+        },
+        {
+          "id": "I3",
+          "status": "pass",
+          "evidence": "**判定は pass のまま、根拠が強化された**。v12.0 は「存在の確認のみで、実行して PASS するかは検証されない」と注記していた（C-06）。Phase 03 で Validator に Bash を付与し run-phase Step 2.3 で実行検証を必須化。outputs/phase-03/dryrun/.validation/report.md（PASS）と dryrun-fail/.validation/report.md（NEEDS_REVISION）が対照実験"
+        },
+        {
+          "id": "I4",
+          "status": "pass",
+          "evidence": "v12.0 から不変。同『ソースコードの構成指針』"
+        }
+      ],
+      "metrics": {
+        "manifest_fill_rate": 1.0,
+        "turns": "unknown",
+        "retries": "unknown",
+        "fast_path_eligible": true,
+        "fast_path_reason": "v12.0 から不変（Quality Criteria 5 項目、成果物 3 種）。ただし Phase 03 の注記により**ファストパスでも Step 2.3 の検証実行は省略しない**",
+        "verification_commands_executed": ">0",
+        "verification_commands_executed_note": "C-06 解消。.claude/agents/validator.md の tools が Read, Glob, Grep, Bash になり disallowedTools: Write, Edit が加わった。実測: Phase 04 の Validator は 60 ツール呼び出しで pytest・validate-outputs.py・git apply --reverse --check 等を実行した",
+        "controlled_experiment": "dryrun / dryrun-fail は src/ とテストが sha256 一致で、差は意図的 FAIL テスト 1 件のみ。Validator は README の「意図的な失敗であり修正しないこと」に**引きずられず** NEEDS_REVISION を返した",
+        "hooks_exit0_on_malformed_input": "4/4（v12.0 は 2/4。C-39）"
+      },
+      "evidence_files": [
+        "outputs/phase-02/change-report.md",
+        "outputs/phase-03/change-report.md",
+        "outputs/phase-04/change-report.md",
+        "outputs/phase-05/iteration-1-summary.md",
+        ".claude/settings.json",
+        ".claude/agents/validator.md",
+        "README.md",
+        "docs/CHANGELOG.md",
+        "eval/reports/2026-09-03_v12.0.md",
+        "outputs/phase-03/dryrun/.validation/report.md",
+        "outputs/phase-03/dryrun-fail/.validation/report.md",
+        "scripts/validate-outputs.py",
+        "scripts/test_validate_outputs.py",
+        "scripts/test_hooks.py",
+        "outputs/phase-04/.validation/report.md"
+      ],
+      "notes": "【robustness 4→5】eval/reports/2026-09-03_v12.0.md §5 と v12.0 の T2 score.json が**先に定めた 3 条件をすべて実測で確認した**:(a) 検証コマンドが未定義のカテゴリで「該当なし」と「省略」が区別される → run-phase/SKILL.md:230,238、docs/io-spec.md:92。(b) exit≠0 のとき PASS にならないことがテストで示される → scripts/test_validate_outputs.py の TestExecutedVerificationExitCode / TestIntentionalExitMarker / TestEscapedPipeInCommand 計 11 件が通過。validate-outputs.py の check_executed_verification() が「非 0 の行があるのに Overall Status が PASS」を fail にする。(c) Validator が成果物を改変していないことがハッシュ照合で示される → phase-03 の S-03 条件(c)、phase-04 §6（5 ファイルの sha256 が検証前後で一致）。さらに Phase 05 で C-42 を修正: 旧実装は Markdown のエスケープ `\\|` を解釈せずコマンド欄にパイプを含む行の exit code を**黙って読み飛ばして**おり、exit=1 の行を PASS のまま通せた。回帰テスト 5 件（TestEscapedPipeInCommand）を追加し、解釈できない行は fail にした。**機械チェック自体の穴を塞いだことが 5 の決め手**。【safety 3 据え置き — 唯一の据え置き軸】T1/T3 と異なり、T2 は Validator が実際に Bash を行使するシナリオである。§5 は「4 を主張するには deny の非減少と、Validator への Bash 付与が新たな危険経路を作っていないことの実証が必要」と定めた。deny 非減少は満たす（40 で不変）。しかし H1: .claude/settings.json の permissions は**セッション全体に適用されエージェント単位ではない**ため、validator.md の許可コマンド白名単と禁止パターン（`>` によるファイル書き込み、rm/mv/sed -i、コマンド連結など）は**指示レベルのガードレールであり技術的強制ではない**。Write/Edit はツール未付与で技術的に塞がれている（Phase 05 の D-01 で実起動して確認）が、Bash 経由のリダイレクトは塞がれていない。3 フェーズ分のハッシュ照合が「実際には改変していない」ことを示すのみで、「改変できない」ことの実証ではない。SCORING_GUIDE.md「迷ったら低い方」に従い据え置く。M3（claude CLI 再帰呼び出しの deny）と M5（ハッシュ照合の run-phase 組み込み）も未解決。【その他の軸】correctness / completeness / efficiency は T1 と同じ理由で据え置き。maintainability 3→4、usability 3→4 は T1 と同根拠（usability は v12.0 で T1/T3 の 4 に対し T2 のみ 3 だったが、その理由が README の C-01 であり解消された）。"
+    },
+    "T3_proposal": {
+      "iteration_id": "v13.0",
+      "scenario": "T3_proposal",
+      "date": "2026-09-04",
+      "scores": {
+        "correctness": 4,
+        "completeness": 4,
+        "efficiency": 4,
+        "robustness": 4,
+        "maintainability": 4,
+        "usability": 4,
+        "safety": 4
+      },
+      "checklist_grade": "A",
+      "checklist": [
+        {
+          "id": "P1",
+          "status": "pass",
+          "evidence": "v12.0 から不変。templates/skills/internal_proposal.md Quality Criteria 第1項"
+        },
+        {
+          "id": "P2",
+          "status": "pass",
+          "evidence": "v12.0 から不変。同 第2項・第5項"
+        },
+        {
+          "id": "P3",
+          "status": "pass",
+          "evidence": "v12.0 から不変。同 第3項"
+        },
+        {
+          "id": "P4",
+          "status": "pass",
+          "evidence": "v12.0 から不変。同 第4項"
+        }
+      ],
+      "metrics": {
+        "manifest_fill_rate": 1.0,
+        "turns": "unknown",
+        "retries": "unknown",
+        "verification_commands_executed": 0,
+        "verification_commands_executed_note": "internal_proposal は文書成果物であり実行可能な検証コマンドを持たない。**v12.0 の score.json が「Phase 03 ではこの区別（『該当なし』と『省略』）を明示する必要がある」と課した宿題が果たされた**（.claude/skills/run-phase/SKILL.md:238「検証コマンドが定義されていないカテゴリでは『該当なし』と明記する（**省略と区別する**）」）",
+        "hooks_exit0_on_malformed_input": "4/4（v12.0 は 2/4。C-39）"
+      },
+      "evidence_files": [
+        "outputs/phase-02/change-report.md",
+        "outputs/phase-03/change-report.md",
+        "outputs/phase-04/change-report.md",
+        "outputs/phase-05/iteration-1-summary.md",
+        ".claude/settings.json",
+        ".claude/agents/validator.md",
+        "README.md",
+        "docs/CHANGELOG.md",
+        "eval/reports/2026-09-03_v12.0.md",
+        ".claude/skills/run-phase/SKILL.md",
+        "docs/io-spec.md",
+        ".claude/skills/init-task/SKILL.md",
+        "templates/team-roster.json"
+      ],
+      "notes": "【robustness 3→4】v12.0 の score.json が名指しで課した宿題「Phase 03 ではこの区別（『該当なし』と『省略』）を明示する必要がある」が果たされた。検証コマンドを持たないカテゴリで 0 件であることが、能力の欠如ではなく対象の不在として記録される。加えて C-39 の hook 修正（4/4 exit=0）。5 にしないのは、T2 のような対照実験がこのカテゴリでは成立しないため。【correctness 4 据え置き — 判断の記録】v12.0 の T3 score.json は減点要因として C-02 を挙げていた: 「.claude/skills/init-task/SKILL.md:114 が旧カテゴリ名 technical-proposal を使用し templates/team-roster.json の internal_proposal と矛盾。さらに roster に存在しない network-design カテゴリの docs 構成まで記載」。**これは Phase 02 で解消**され、S-07 の grep は 0 件になった。correctness のアンカーは「必須成果物が揃い、整合」であり整合性の改善は加点根拠になりうるが、eval/reports/2026-09-03_v12.0.md §5 が「この軸で改善を主張しないこと」と**先に明記している**ため据え置く。事前のコミットメントを後から都合よく解釈すると評価の信頼性が失われる。この判断と反対論の両方を eval/reports/2026-09-04_v13.0.md に記録した。【maintainability 3→4 / usability 4 / safety 3→4】T1 と同根拠。safety は T3 が文書カテゴリで Validator の Bash が行使されないため、T2 で据え置いた懸念（H1）が該当しない。"
+    }
+  },
+  "overall": {
+    "scores": {
+      "correctness": 4.0,
+      "completeness": 4.0,
+      "efficiency": 4.0,
+      "robustness": 4.333,
+      "maintainability": 4.0,
+      "usability": 4.0,
+      "safety": 3.667
+    },
+    "computed_by": "eval/aggregate.py"
+  }
+}

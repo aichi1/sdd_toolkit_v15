@@ -1,0 +1,215 @@
+{
+  "iteration_id": "v14.0",
+  "date": "2026-09-06",
+  "commit": "",
+  "scenarios": {
+    "T1_research": {
+      "iteration_id": "v14.0",
+      "scenario": "T1_research",
+      "date": "2026-09-06",
+      "scores": {
+        "correctness": 5,
+        "completeness": 4,
+        "efficiency": 4,
+        "robustness": 4,
+        "maintainability": 4,
+        "usability": 4,
+        "safety": 4
+      },
+      "checklist_grade": "A",
+      "checklist": [
+        {
+          "id": "R1",
+          "status": "pass",
+          "evidence": "v13.0 から不変。templates/skills/research_report.md 必須セクション1（TL;DR）。Iteration 2 はテンプレートの必須セクションを変更していない"
+        },
+        {
+          "id": "R2",
+          "status": "pass",
+          "evidence": "v13.0 から不変。同 必須セクション2（比較軸の定義と選定理由）"
+        },
+        {
+          "id": "R3",
+          "status": "pass",
+          "evidence": "v13.0 から不変。同 必須セクション7（出典・参考文献）"
+        },
+        {
+          "id": "R4",
+          "status": "pass",
+          "evidence": "v13.0 から不変。同 必須セクション5（不確実性・留意点）"
+        }
+      ],
+      "metrics": {
+        "manifest_fill_rate": 1.0,
+        "turns": "unknown",
+        "retries": "unknown",
+        "verification_commands_executed": 0,
+        "verification_commands_executed_note": "research_report は実行可能な検証コマンドを持たないカテゴリ。v13.0 と同じ扱い（該当なしとして明示。docs/io-spec.md §2.4）",
+        "trace_check_defects": 0,
+        "spec_check_defects": 0,
+        "hooks_exit0_on_malformed_input": "4/4（v13.0 から不変。Iteration 2 は hooks を変更していない）"
+      },
+      "evidence_files": [
+        "outputs/phase-06/change-report.md",
+        "outputs/phase-07/change-report.md",
+        "outputs/phase-08/change-report.md",
+        "outputs/phase-09/change-report.md",
+        "outputs/phase-10/change-report.md",
+        "docs/requirements.md §9",
+        "docs/constitution.md（第10条・第11条）",
+        "scripts/trace_check.py",
+        "scripts/test_trace_check.py",
+        "scripts/spec_check.py",
+        "scripts/test_spec_check.py",
+        "docs/spec-check-allowlist.json",
+        "docs/convergence.md",
+        ".claude/settings.json",
+        "README.md",
+        "docs/CHANGELOG.md",
+        "eval/reports/2026-09-04_v13.0.md §4"
+      ],
+      "notes": "【correctness 4→5 — 唯一の上昇軸】eval/reports/2026-09-04_v13.0.md §4 仮説1 が先に定めた 3 条件をすべて実測で確認した: (1) `python3 scripts/trace_check.py` が実在の docs/requirements.md（29 要件）に対して未対応要件を検出できる（`python3 -m pytest scripts/test_trace_check.py -q -k real_project` 1 passed。`test_real_project_detects_iteration3_requirements` は R-19〜R-26 が `planned`/`overdue` として実際に検出されることを本プロジェクト自身のデータで確認する）。(2) `/spec-check`（実体 `scripts/spec_check.py`）が C-19 型の矛盾（存在しないコマンドを検証手段に指定）を検出できる（`python3 -m pytest scripts/test_spec_check.py -q -k c19` 1 passed。`test_c19_recap` は実在した欠陥 C-19（`/recap` が存在しないのに検証手段として書かれていた）を再現し検出することを確認する）。(3) 検出はテストで再現可能（上記 2 テストは pytest として exit 0 で再現し、手動確認のみに依存しない）。3 条件がすべて満たされたため、本プロジェクトの整合性検査は Iteration 1 時点に比べ質的に強化された（未対応要件・矛盾する仕様参照のいずれも機械的に 0 件であることを実行時に確認できる）と判断し、correctness のアンカー5「必須成果物が完全に揃い、整合性も高い（矛盾がほぼない）」に照らして 4→5 とした。この判断は T1/T2/T3 いずれのシナリオにも等しく適用される（trace_check.py / spec_check.py はシナリオ種別に依存しないプロジェクト全体の整合性検査であるため）。【completeness / efficiency 4 据え置き】completeness は対象テンプレート（templates/skills/research_report.md）が Iteration 2 で変更されておらず checklist_grade も A のまま。efficiency は turns/retries が依然 unknown（比較の基準が存在しない）ため据え置き。仕様側の品質ゲート（`/clarify` `/spec-check` `/analyze` `/converge`）はすべて `[ ]` 任意ステップであり必須手数を増やしていない。軌跡データの取得は Phase 11 まで待つ。【robustness 4 据え置き】T1 は検証コマンドを持たないカテゴリであり、Iteration 2 の新規スクリプト（trace_check.py / spec_check.py / check_constitution.py）はいずれも Validator 側のツールで T1 シナリオでは行使されない。hooks 4/4 は不変。【maintainability 4 据え置き】要件 ID 規約（§9）とテスト 45→217 件により構造は改善したが、アンカー5が要求する「重複が抑制され」を満たさない。C-28（`/add-feature` の二層重複）は未解決のまま、Phase 07 で新規コマンド 4 件がさらに同じ二層構造（`.claude/commands/*.md` + `.claude/skills/*/SKILL.md`）で追加されており、解消の見込みは Phase 12 のまま変わらない。【usability 4 据え置き】README.md は本フェーズで v14 表記へ更新し、新規 4 コマンド（/clarify /spec-check /analyze /converge）を一覧に追加して実ファイル 16 件との一致を回復した（本フェーズ開始時点では未反映で、Phase 07-09 のいずれも README を更新していなかった。本フェーズの修正により解消）。アンカー5「迷いにくい」には C-28 の二層構造が残るため届かない。【safety 4 据え置き】`.claude/settings.json` は Iteration 2 全体（Phase 06-09）を通じて未変更（allow 38 / deny 40 / ask 18 が不変。各 change-report.md §5 で確認済み）。T1 は文書カテゴリで Validator の Bash が実際には行使されないため v13.0 と同じ理由で 4。"
+    },
+    "T2_implement": {
+      "iteration_id": "v14.0",
+      "scenario": "T2_implement",
+      "date": "2026-09-06",
+      "scores": {
+        "correctness": 5,
+        "completeness": 4,
+        "efficiency": 4,
+        "robustness": 5,
+        "maintainability": 4,
+        "usability": 4,
+        "safety": 3
+      },
+      "checklist_grade": "A",
+      "checklist": [
+        {
+          "id": "I1",
+          "status": "pass",
+          "evidence": "v13.0 から不変。templates/skills/small_implementation.md の README 必須 5 セクション"
+        },
+        {
+          "id": "I2",
+          "status": "pass",
+          "evidence": "v13.0 から不変。同 Quality Criteria 第2項（入力エラー・例外の扱い）"
+        },
+        {
+          "id": "I3",
+          "status": "pass",
+          "evidence": "v13.0 から不変。scripts/ 配下は pytest で自動テストされる。本フェーズで pytest は 217 件で不変（Phase 09 と同数。回帰なし）"
+        },
+        {
+          "id": "I4",
+          "status": "pass",
+          "evidence": "v13.0 から不変。同『ソースコードの構成指針』"
+        }
+      ],
+      "metrics": {
+        "manifest_fill_rate": 1.0,
+        "turns": "unknown",
+        "retries": "unknown",
+        "verification_commands_executed": ">0",
+        "verification_commands_executed_note": "v13.0 から不変。Validator は Phase 06 以降も `scripts/*.py` の変更を独立に再実行する（第3条 改正(2)、C-49）",
+        "trace_check_defects": 0,
+        "spec_check_defects": 0,
+        "controlled_experiment": "v13.0 の対照実験（outputs/phase-03/dryrun, dryrun-fail）は変更されておらず結果も不変",
+        "hooks_exit0_on_malformed_input": "4/4（v13.0 から不変）"
+      },
+      "evidence_files": [
+        "outputs/phase-06/change-report.md",
+        "outputs/phase-07/change-report.md",
+        "outputs/phase-08/change-report.md",
+        "outputs/phase-09/change-report.md",
+        "outputs/phase-10/change-report.md",
+        "scripts/trace_check.py",
+        "scripts/test_trace_check.py",
+        "scripts/spec_check.py",
+        "scripts/test_spec_check.py",
+        "scripts/check_constitution.py",
+        "scripts/test_check_constitution.py",
+        ".claude/settings.json",
+        "outputs/phase-03/dryrun/.validation/report.md",
+        "outputs/phase-03/dryrun-fail/.validation/report.md",
+        "outputs/phase-04/.validation/report.md",
+        "eval/reports/2026-09-04_v13.0.md §4"
+      ],
+      "notes": "【correctness 4→5】T1 と同じ根拠。3 条件（trace_check.py の未対応検出 / spec_check.py の C-19 型検出 / 両者がテストで再現可能）を実測で確認した（`pytest -k real_project` 1 passed、`pytest -k c19` 1 passed）。T2 特有の追加根拠として、Validator 側の検証実行能力（C-06 解消）に加え、Iteration 2 で Validator が変更済み scripts/*.py を独立に再実行する義務（第3条 改正(2)）が明文化され、Phase 06-09 いずれも Critical 0〜3 件・QC Met で通過している。整合性の機械保証がさらに強化されたため 5 とした。【robustness 5 据え置き（上限） — v13.0 で既に 5】v13.0 の 3 条件（該当なし/省略の区別、exit≠0でPASS不可、ハッシュ照合）はいずれも不変。Iteration 2 は新たに `spec_check.py`（許可リストの malformed JSON は何も許可しない = fail-safe。`test_malformed_json_allows_nothing`）と `trace_check.py`（規約外トークンは黙って読み飛ばさず exit 1 で報告）を追加し、フェイルセーフな設計をさらに積み重ねたが、尺度は 0-5 で上限に達しているため据え置き。【maintainability 4 据え置き】要件 ID 規約とテスト 45→217 件の拡充は構造の見通しを改善したが、C-28（二層重複）は未解決かつ Phase 07 で新規 4 コマンド分が同型のパターンで増えている。アンカー5「重複が抑制され」を満たさないため 4 のまま。【usability 4 据え置き】T1 と同根拠。【safety 3 据え置き — 唯一の据え置き軸（v13.0 と同一理由）】`.claude/settings.json` は Phase 06-09 を通じて一切変更されていない（各 change-report.md §5 で確認済み。allow 38 / deny 40 / ask 18 が全フェーズで不変）。H1（permissions はセッション全体に適用されエージェント単位ではない）・M3（claude CLI 再帰呼び出しの deny）・M5（ハッシュ照合の run-phase 組み込み）はいずれも未解消のまま Iteration 3（Phase 11-13）へ持ち越されている。T2 は Validator が実際に Bash を行使する唯一のシナリオであり、v13.0 の判断（据え置き）を変える新たな実証は無いため 3 のまま。S-02 の非減少条件（v13.0 以上）は自明に満たす。"
+    },
+    "T3_proposal": {
+      "iteration_id": "v14.0",
+      "scenario": "T3_proposal",
+      "date": "2026-09-06",
+      "scores": {
+        "correctness": 5,
+        "completeness": 4,
+        "efficiency": 4,
+        "robustness": 4,
+        "maintainability": 4,
+        "usability": 4,
+        "safety": 4
+      },
+      "checklist_grade": "A",
+      "checklist": [
+        {
+          "id": "P1",
+          "status": "pass",
+          "evidence": "v13.0 から不変。templates/skills/internal_proposal.md Quality Criteria 第1項"
+        },
+        {
+          "id": "P2",
+          "status": "pass",
+          "evidence": "v13.0 から不変。同 第2項・第5項"
+        },
+        {
+          "id": "P3",
+          "status": "pass",
+          "evidence": "v13.0 から不変。同 第3項"
+        },
+        {
+          "id": "P4",
+          "status": "pass",
+          "evidence": "v13.0 から不変。同 第4項"
+        }
+      ],
+      "metrics": {
+        "manifest_fill_rate": 1.0,
+        "turns": "unknown",
+        "retries": "unknown",
+        "verification_commands_executed": 0,
+        "verification_commands_executed_note": "internal_proposal は文書成果物であり実行可能な検証コマンドを持たない。v13.0 から不変の扱い",
+        "trace_check_defects": 0,
+        "spec_check_defects": 0,
+        "hooks_exit0_on_malformed_input": "4/4（v13.0 から不変）"
+      },
+      "evidence_files": [
+        "outputs/phase-06/change-report.md",
+        "outputs/phase-07/change-report.md",
+        "outputs/phase-08/change-report.md",
+        "outputs/phase-09/change-report.md",
+        "outputs/phase-10/change-report.md",
+        "docs/requirements.md §4（C-52）",
+        "docs/plan.md",
+        "docs/convergence.md",
+        ".claude/settings.json",
+        "README.md",
+        "docs/CHANGELOG.md",
+        "eval/reports/2026-09-04_v13.0.md §4"
+      ],
+      "notes": "【correctness 4→5】T1/T2 と同じ根拠。T3 に固有の追加観点として、本フェーズで docs/plan.md の乖離した実測値（要件45件・課題46件の記述）と重複行を解消し、docs/requirements.md に新規発見（C-52。check_constitution.py の D-02 判定の部分文字列一致バグ）をオーナー決定（Iteration 3 へ先送り）とともに記録した。仕様書間の整合性がさらに高まったため、correctness アンカー5に照らして 5 とした。【completeness / efficiency 4 据え置き】T1 と同根拠。【robustness 4 据え置き】T3 も検証コマンドを持たないカテゴリであり、T2 のような対照実験が成立しないため v13.0 と同じ 4 のまま。【maintainability 4 据え置き】T1/T2 と同根拠。【usability 4 据え置き】T1 と同根拠。【safety 4 据え置き】T3 は文書カテゴリで Validator の Bash が行使されないため、T2 で据え置いた H1 の懸念が該当しない。settings.json は Iteration 2 全体で不変（allow 38 / deny 40 / ask 18）。S-02 の非減少条件を自明に満たす。"
+    }
+  },
+  "overall": {
+    "scores": {
+      "correctness": 5.0,
+      "completeness": 4.0,
+      "efficiency": 4.0,
+      "robustness": 4.333,
+      "maintainability": 4.0,
+      "usability": 4.0,
+      "safety": 3.667
+    },
+    "computed_by": "eval/aggregate.py"
+  }
+}

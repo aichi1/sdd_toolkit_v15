@@ -1,0 +1,195 @@
+{
+  "iteration_id": "v12.0",
+  "date": "2026-09-03",
+  "commit": "",
+  "scenarios": {
+    "T1_research": {
+      "scores": {
+        "correctness": 4,
+        "completeness": 4,
+        "efficiency": 4,
+        "robustness": 3,
+        "maintainability": 3,
+        "usability": 4,
+        "safety": 3
+      },
+      "checklist": [
+        {
+          "id": "R1",
+          "status": "pass",
+          "evidence": "templates/skills/research_report.md 必須セクション1『TL;DR / エグゼクティブサマリー（冒頭に配置、3-5行で結論を要約）』。Quality Criteria 第1項『TL;DR が冒頭にあり、結論を読むだけで要点が分かる』。scripts/validate-outputs.py:252 required_sections['research_report'] が tl;dr/tldr/エグゼクティブサマリー のキーワードを自動検出"
+        },
+        {
+          "id": "R2",
+          "status": "pass",
+          "evidence": "templates/skills/research_report.md 必須セクション2『比較軸の定義と選定理由』。Quality Criteria 第2項。scripts/validate-outputs.py:253 が 比較軸/評価軸/比較の観点 を自動検出"
+        },
+        {
+          "id": "R3",
+          "status": "pass",
+          "evidence": "templates/skills/research_report.md 必須セクション7『出典・参考文献（情報源を一覧化、URLと取得日を含む）』。Quality Criteria 第3項『全データに出典（情報源、取得日）が明記されている』。scripts/validate-outputs.py:255 が 出典/参考文献/references/sources を自動検出"
+        },
+        {
+          "id": "R4",
+          "status": "pass",
+          "evidence": "templates/skills/research_report.md 必須セクション5『不確実性・留意点』。Quality Criteria 第4項。scripts/validate-outputs.py:254 が 不確実性/留意点/limitation/注意事項 を自動検出"
+        }
+      ],
+      "checklist_grade": "A",
+      "metrics": {
+        "manifest_fill_rate": 1.0,
+        "turns": "unknown",
+        "retries": "unknown",
+        "init_task_qa_rounds": "1-2 (templates/intake/research_report.md のワンショット収集)",
+        "fast_path_eligible": false,
+        "fast_path_reason": "templates/skills/research_report.md の Quality Criteria が6項目（ファストパス条件は5項目以下）",
+        "verification_commands_executed": 0,
+        "verification_commands_executed_note": "C-06: .claude/agents/validator.md:4 の tools は Read, Glob, Grep のみで Bash がなく、Validator は検証コマンドを一切実行できない。C-12（軌跡指標）の先取り記録"
+      },
+      "evidence_files": [
+        "templates/intake/research_report.md",
+        "templates/skills/research_report.md",
+        ".claude/skills/init-task/SKILL.md",
+        ".claude/skills/run-phase/SKILL.md",
+        "scripts/validate-outputs.py",
+        ".claude/agents/validator.md",
+        "templates/team-roster.json",
+        "eval/scenarios/T1_research/checklist.json",
+        "eval/scenarios/T1_research/expected_manifest.json",
+        "README.md",
+        "outputs/phase-01/inventory.md"
+      ],
+      "notes": "【比較可能性の宣言】C-24（outputs/phase-01/changelog-draft.md §2）により、v6.4 採点（2026-02-12）以降、ツールキットの実体的変更は create-deck.md / slide_template.js の追加のみで、v7〜v11 に相当する git コミットは 0 件であることが判明した。したがって v12.0 は v6.4 と実質同一状態であり、7軸すべてを v6.4 と同値で据え置いた。【減点要因を認識しつつ据え置いた項目】(1) correctness: C-02（.claude/skills/init-task/SKILL.md:85,95,114,229 に旧カテゴリ名 investigation-report が残存し、templates/team-roster.json:5,17 の research_report と矛盾）は本来の減点要因だが、expected_manifest の requirements/plan/team は全カテゴリ共通で必ず生成されるため充足率は 1.0 であり、かつ v6.4 と同一状態のため 4 を維持。**この結果、Phase 02 で C-02 を解消しても correctness は上がらない（元々満たしていたため）**。(2) usability: README.md:1 が v6.1 表記のままで /re-init-task, /add-feature, /create-deck の3コマンド（全11コマンド中）が未記載、ディレクトリ構成節に docs/ eval/ scripts/ templates/ が欠落（C-01）。ただし T1 の導線（README → /init-task → /run-phase）自体は通るため『README/導線が破綻（実行不能レベル）』の上限制約は適用せず 4 を維持。(3) maintainability: v6.5 の Token Optimization（.claude/rules/*.md の圧縮 + docs/rules-reference/ への詳細退避）は加点要因だが、C-18（追跡ファイル71件が CRLF）・C-01/C-24（ドキュメント同期の断絶）・C-20（create-deck の混在）が相殺するため 3 を維持。【v13 以降への制約】robustness を 4 以上にするには『複数ケースに自然に対応（例外の扱いが明確、ガードが適切）』の水準が必要。検証コマンドを実行できるようにしただけでは 3→4 の根拠として不十分であり、検証コマンド未定義カテゴリの扱いと実行失敗時のフォールバックが明示されていることを要件とする。"
+    },
+    "T2_implement": {
+      "scores": {
+        "correctness": 4,
+        "completeness": 4,
+        "efficiency": 4,
+        "robustness": 4,
+        "maintainability": 3,
+        "usability": 3,
+        "safety": 3
+      },
+      "checklist": [
+        {
+          "id": "I1",
+          "status": "pass",
+          "evidence": "templates/skills/small_implementation.md 必須ファイル構成に README.md、『README.md の必須セクション』として5項目（概要/前提条件/インストール手順/使い方/エラー時の対処）を規定。Quality Criteria 第1項『README.md にインストール・実行手順があり、コピペで動く』。scripts/validate-outputs.py:258,293-294 が README.md の存在を自動チェック"
+        },
+        {
+          "id": "I2",
+          "status": "pass",
+          "evidence": "templates/skills/small_implementation.md Quality Criteria 第2項『入力エラーや例外の扱いがコード内で実装され、README にも説明がある』。Procedure Step 5『エラーハンドリングを実装する（不正入力、ファイル不在等）』。Common Pitfalls『エラー処理が雑（bare except, 無言の pass）→ 具体的メッセージを出す』"
+        },
+        {
+          "id": "I3",
+          "status": "pass",
+          "evidence": "templates/skills/small_implementation.md 必須ファイル構成に tests/test_{name}.py、『最低1つの正常系テスト』『最低1つの異常系テスト』。Quality Criteria 第3項。scripts/validate-outputs.py:259 が tests/ ディレクトリの存在を自動チェック。**ただし『存在』の確認のみで『実行して PASS するか』は検証されない（下記 notes 参照）**"
+        },
+        {
+          "id": "I4",
+          "status": "pass",
+          "evidence": "templates/skills/small_implementation.md『ソースコードの構成指針』（エントリポイントとロジックの分離、200行超で分割）。Quality Criteria 第4項『コードがモジュール分割され、各ファイルの責務が明確』。scripts/validate-outputs.py:259 が src/ の存在を自動チェック"
+        }
+      ],
+      "checklist_grade": "A",
+      "metrics": {
+        "manifest_fill_rate": 1.0,
+        "turns": "unknown",
+        "retries": "unknown",
+        "init_task_qa_rounds": "1-2 (templates/intake/small_implementation.md の8問ワンショット収集)",
+        "fast_path_eligible": true,
+        "fast_path_reason": "Quality Criteria 5項目（条件: 5項目以下）、成果物3種 README/src/tests（条件: 3つ以下）。3シナリオ中 T2 のみファストパス条件を満たす",
+        "verification_commands_executed": 0,
+        "verification_commands_executed_note": "C-06: .claude/agents/validator.md:4 の tools は Read, Glob, Grep のみ。本文『ツールアクセス権限』節は bash_tool の許可コマンド（cat/grep/find/wc/head/tail/ls）と使用例を詳述しており、frontmatter と本文が矛盾している。~/.sdd-knowledge/retrospectives/2026-07-02_small_implementation_sdd-toolkit-v14.json の operational_note に『pytest 実行確認と .validation/report.md 書込はメインが代行する運用を確立』と実運用記録あり"
+      },
+      "evidence_files": [
+        "templates/intake/small_implementation.md",
+        "templates/skills/small_implementation.md",
+        ".claude/skills/init-task/SKILL.md",
+        ".claude/skills/run-phase/SKILL.md",
+        "scripts/validate-outputs.py",
+        "validate_rules.yaml",
+        ".claude/agents/validator.md",
+        "templates/team-roster.json",
+        "eval/scenarios/T2_implement/checklist.json",
+        "eval/scenarios/T2_implement/expected_manifest.json",
+        "README.md",
+        "outputs/phase-01/inventory.md",
+        "~/.sdd-knowledge/retrospectives/2026-07-02_small_implementation_sdd-toolkit-v14.json"
+      ],
+      "notes": "【比較可能性の宣言】C-24 により v12.0 は v6.4 と実質同一状態のため、7軸すべてを v6.4 と同値で据え置いた。【I3 の判定根拠】チェックリストの文言は『最低1つの自動テストがある（pytest等）』＝存在の要求であり、テンプレートと validate-outputs.py の tests/ 存在チェックで充足するため pass。ただし C-06 により『そのテストが通るか』は検証経路が存在せず、壊れたテストを含む成果物が PASS しうる。この限界は metrics.verification_commands_executed=0 として記録した。【robustness を 4 に据え置いた根拠】T2 は project-type python（validate_rules.yaml:19-24 で src/ tests/ を required_checks に持つ）とテンプレートの Troubleshooting 表（4症状 × 原因/対処/再開ポイント）、intake テンプレートのデフォルト値によるフォールバックを備えており、アンカー3『一般的なゆらぎには耐える（代替手順/フォールバックがある）』を上回る。C-06 は減点要因だが v6.4 と同一状態のため据え置く。**【Phase 03 への制約 — 重要】v13.0 で robustness を 5 にするには『複数ケースに自然に対応（例外の扱いが明確、ガードが適切）』が必要。Validator に Bash を付与し検証コマンドを実行できるようにしただけでは 4→5 の根拠にならない。5 を主張するには最低限、(a) 検証コマンドが未定義のカテゴリで『該当なし』と『省略』が区別されること、(b) 検証コマンドが exit≠0 のとき PASS にならないことがテストで示されること、(c) Validator が成果物を改変していないことがハッシュ照合で示されること、の3点が必要。安易に 5 を付けないこと。**【usability を 3 に据え置いた根拠】README.md:1 が v6.1 表記で、11コマンド中 /re-init-task, /add-feature, /create-deck が未記載。ただし T2 の導線自体は通るためアンカー3『普通に使える（README/手順が通る、checklist_grade B以上）』に合致。"
+    },
+    "T3_proposal": {
+      "scores": {
+        "correctness": 4,
+        "completeness": 4,
+        "efficiency": 4,
+        "robustness": 3,
+        "maintainability": 3,
+        "usability": 4,
+        "safety": 3
+      },
+      "checklist": [
+        {
+          "id": "P1",
+          "status": "pass",
+          "evidence": "templates/skills/internal_proposal.md Quality Criteria 第1項『目的と成功条件が冒頭で定義されている』。scripts/validate-outputs.py:263 required_sections['internal_proposal'] が 目的/成功条件/objective/success を自動検出"
+        },
+        {
+          "id": "P2",
+          "status": "pass",
+          "evidence": "templates/skills/internal_proposal.md Quality Criteria 第2項『選択肢が最低2案あり、メリット・デメリット・コストで対比されている』、第5項『推奨案が選択肢比較の結果と整合している』。scripts/validate-outputs.py:264 が 選択肢/案a/案b/option/alternative を自動検出"
+        },
+        {
+          "id": "P3",
+          "status": "pass",
+          "evidence": "templates/skills/internal_proposal.md Quality Criteria 第3項『主要リスクが3つ以上あり、各リスクに具体的な対策が記載されている』。scripts/validate-outputs.py:265 が リスク/対策/risk/mitigation を自動検出"
+        },
+        {
+          "id": "P4",
+          "status": "pass",
+          "evidence": "templates/skills/internal_proposal.md Quality Criteria 第4項『次アクションが具体的で、各項目に担当・期限・成果物が明記されている』。scripts/validate-outputs.py:266 が 次アクション/next action/ロードマップ/roadmap/担当 を自動検出"
+        }
+      ],
+      "checklist_grade": "A",
+      "metrics": {
+        "manifest_fill_rate": 1.0,
+        "turns": "unknown",
+        "retries": "unknown",
+        "init_task_qa_rounds": "1-2 (templates/intake/internal_proposal.md のワンショット収集)",
+        "fast_path_eligible": false,
+        "fast_path_reason": "templates/skills/internal_proposal.md の Quality Criteria が6項目（条件は5項目以下）",
+        "verification_commands_executed": 0,
+        "verification_commands_executed_note": "C-06。ただし internal_proposal は文書成果物であり、実行可能な検証コマンドを持たないカテゴリ。Phase 03 ではこの区別（『該当なし』と『省略』）を明示する必要がある"
+      },
+      "evidence_files": [
+        "templates/intake/internal_proposal.md",
+        "templates/skills/internal_proposal.md",
+        ".claude/skills/init-task/SKILL.md",
+        ".claude/skills/run-phase/SKILL.md",
+        "scripts/validate-outputs.py",
+        ".claude/agents/validator.md",
+        "templates/team-roster.json",
+        "eval/scenarios/T3_proposal/checklist.json",
+        "eval/scenarios/T3_proposal/expected_manifest.json",
+        "README.md",
+        "outputs/phase-01/inventory.md"
+      ],
+      "notes": "【比較可能性の宣言】C-24 により v12.0 は v6.4 と実質同一状態のため、7軸すべてを v6.4 と同値で据え置いた。【correctness の減点要因】C-02: .claude/skills/init-task/SKILL.md:114 が旧カテゴリ名 technical-proposal を使用し、templates/team-roster.json の internal_proposal と矛盾。さらに init-task SKILL.md は roster に存在しない network-design カテゴリの docs 構成まで記載している（同:229 付近）。expected_manifest（requirements/plan/team + proposal.md）は全カテゴリ共通部分で充足するため 4 を維持したが、これは v6.4 との比較可能性を優先した判断であり、Phase 02 で C-02 を解消しても correctness は上がらない。【safety を 3 に据え置いた根拠】.claude/settings.json:16 の sandbox.network.allowedDomains が [\"*\"] でネットワーク隔離が実質無効（C-04）。一方 permissions.deny は .env / ~/.ssh / ~/.aws / sudo / rm -rf / docker / git push --force など38項目を網羅し、git/pip/npm の変更系は ask に置かれている。SCORING_GUIDE の上限制約『安全上の赤信号（秘密情報/危険操作の誘発）→ Safety は最大2』は、秘密情報への誘導や危険操作の推奨が無いため適用しない。アンカー3『基本的な配慮がある（deny/ignore、注意書き、危険操作回避）』に合致。**Phase 02 で allowedDomains を6ドメインに縮小しても、それ単独で 3→4 とはしない。4 を主張するには deny 要素数の非減少と、Validator への Bash 付与（Phase 03）が新たな危険経路を作っていないことの実証が必要。**"
+    }
+  },
+  "overall": {
+    "scores": {
+      "correctness": 4.0,
+      "completeness": 4.0,
+      "efficiency": 4.0,
+      "robustness": 3.333,
+      "maintainability": 3.0,
+      "usability": 3.667,
+      "safety": 3.0
+    },
+    "computed_by": "eval/aggregate.py"
+  }
+}

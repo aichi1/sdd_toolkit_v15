@@ -1,0 +1,23 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+
+# Windows security zone metadata (from downloads)
+*:Zone.Identifier
+*Zone.Identifier
+
+# Python bytecode cache
+__pycache__/
+*.pyc
+
+# Local, machine-specific Claude Code settings (contains personal paths)
+.claude/settings.local.json
+
+# Generated project-specific expert agents (not part of the toolkit itself)
+.claude/agents/generated/
+
+# Stop hook の無限ループ防止カウンタ（session_id ごとの発火回数。K-06 / Phase 04）
+.claude/hooks/.state/
+
+# 生成物（プロジェクト側）
+.pytest_cache/
