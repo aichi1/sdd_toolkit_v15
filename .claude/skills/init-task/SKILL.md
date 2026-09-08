@@ -17,6 +17,7 @@
 ## 出力
 - 仕様ファイルを含む `./docs/` ディレクトリ（`_manifest.json` 含む）
 - `./docs/team.md`（チーム編成・専門家エージェントの役割とタイミング）
+- `./docs/constitution.md`（**全カテゴリ必須**。非交渉の原則と機械検査可能な強制点）
 - フェーズ別の `SKILL.md` を含む `./skills/` ディレクトリ
 - `.claude/agents/generated/` に専門家エージェント
 - `./CLAUDE.md`（プロジェクト仕様）
@@ -79,6 +80,7 @@
 - `docs/requirements.md`（目的、スコープ、非目的、制約、成功条件）
 - `docs/plan.md`（Phase構成、成果物、進め方）
 - `docs/team.md`（チーム編成と役割）
+- `docs/constitution.md`（**必須**。`templates/constitution.md` を土台に生成する。下記ステップ1.2b 参照）
 
 加えて、カテゴリ固有のファイルを追加：
 
@@ -113,6 +115,50 @@ docs/
 
 > `templates/team-roster.json` に定義された 3 カテゴリ以外は扱わない。
 > 将来のカテゴリ候補は `docs/rules-reference/file-structure-detail.md`「将来カテゴリ候補」を参照。
+
+**ステップ1.2b：`docs/constitution.md` の生成（全カテゴリ必須）**
+
+`templates/constitution.md` を土台に、**そのプロジェクト固有の**条文を生成する。
+
+1. 各条項は「**原則**」「**理由**」「**強制点**（実行できるコマンド）」の3点セットで書く
+2. **強制点を持たない原則は載せない。** 機械検査できないものは「判定対象外（人間が守るもの）」節に分けて明示する
+3. `scripts/check_constitution.py` は SDD Toolkit 自身の自己改善プロジェクト用にハードコードされている
+   （第2/3/4/10/11 条）。**汎用に流用できるのは第2条（patch.diff の逆適用検査）のみ**。
+   他プロジェクトでは第3/4/10/11 条を実行してはならない旨を constitution.md に明記する
+4. 少なくとも以下の2条は全プロジェクトで置く:
+   - **第1条 検証は実行して確かめる** — 強制点は当該プロジェクトのテスト実行コマンド（`{verification_command}`）
+   - **第2条 変更は必ず可逆** — 強制点は `python3 scripts/check_constitution.py --phase {N} --article 2`
+5. 残りの条文は `docs/constraints.md` のうち**機械検査に落とせるものだけ**を格上げする
+   （grep で検出できる禁止パターン、pytest で確認できる振る舞い等）
+6. 「改正手続き」節と「改正履歴の追認状況」節をテンプレートから引き継ぐ
+   （`check_constitution.py` の `unapproved_amendments` が後者を読む）
+
+> **なぜ必須か**: `docs/constitution.md` は `.claude/agents/validator.md`・`.claude/skills/run-phase/SKILL.md`・
+> `scripts/validate-outputs.py`・`scripts/check_constitution.py` から参照される。
+> 無い場合、Validator は「Required by: constitution.md 第1条」を根拠にできず、
+> **第1条（検証は実行して確かめる）の強制点が Validator の自己申告に退化する。**
+
+**ステップ1.2c：`docs/io-spec.md` に SDD 成果物仕様を含める（全カテゴリ必須）**
+
+`docs/io-spec.md` は「プロダクトの入出力」だけでなく、**フェーズ成果物の仕様**も定義する。
+下流スクリプトが**節番号で参照する**ため、以下の番号を変えてはならない。
+
+| 節 | 内容 | 参照元 |
+|---|---|---|
+| §2.2 | `.metadata.json` のスキーマ | Builder / Validator |
+| **§2.3** | `change-report.md` の**必須6セクション** | `scripts/validate-outputs.py`（見出しの番号と文言を正規表現で検査） |
+| §2.4 | `patch.diff`（`git diff --binary` で生成） | `scripts/check_constitution.py` 第2条 |
+| **§2.5.2** | `revision_history` の打ち切り規則と `owner_decision` | `scripts/check_fix_cycle.py`、`.claude/rules/builder-validator.md` |
+| **§2.6** | `Executed Verification` の表形式 | `scripts/validate-outputs.py`（exit code と Overall Status の整合を検査） |
+
+必須6セクション（**番号と文言の両方**が一致しないと fail する）:
+`## 1. 変更ファイル一覧` / `## 2. 変更の意図` / `## 3. 影響範囲` /
+`## 4. Claude Code バージョン確認結果` / `## 5. settings.json / hooks の前後差分` / `## 6. ロールバック手順`
+
+> 該当しないプロジェクトでも**見出しは省略せず**、内容に「該当なし」と書く。
+
+`Executed Verification` の表は列順 `# | コマンド | exit code | 要約` を固定し、
+コマンド中のパイプは `\|` でエスケープする（**列がズレると exit code の検査が黙って素通りする**）。
 
 **ステップ1.3：構造化仕様収集（インテーク → 深掘り）**
 `templates/intake/` のカテゴリ別インテークテンプレートを使用し、初回で基本情報を一括収集した上で、回答に応じて必要なだけ深掘り質問を行う。
@@ -328,6 +374,9 @@ Commands:
 ## 品質ゲート（Quality Gates）
 
 init-task を完了する前に：
+- [ ] `docs/constitution.md` が存在し、全条項が「原則／理由／強制点」を持つ
+- [ ] constitution の強制点が**実行できるコマンド**として書かれている（擬似コードでない）
+- [ ] `docs/io-spec.md` に §2.3 / §2.5.2 / §2.6 が節番号どおり存在する
 - [ ] すべての成果物に対応するフェーズがある
 - [ ] すべてのフェーズに明確な入力要件がある
 - [ ] docs/ ファイルが簡潔かつ十分である（lorem ipsum がない）
