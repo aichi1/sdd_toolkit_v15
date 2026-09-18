@@ -12,9 +12,10 @@ allowed-tools: Bash
 
 ## 目的
 
-`CLAUDE.md`「現時点の実測値」節は次のように定めている:
-
-> この表は `python3 scripts/metrics.py --markdown` の出力をそのまま貼ったものである。手で書かない。
+**ツールキット自身の保守用コマンド**である。測るのはツールキットの `scripts/` のテスト件数・
+`spec_check.py` の検出件数・許可リスト・`.claude/` の構成など（利用者のプロジェクトの製品テストではない）。
+README・CHANGELOG・`CLAUDE.md` に書く数値は、この出力をそのまま貼る。**手で書かない**
+（ツールキット開発では、手で書いた数値が実体からずれる失敗を 5 回繰り返した）。
 
 このコマンドは、その実測を毎回手で `python3 scripts/metrics.py --markdown` とタイプする代わりに
 `/metrics` 一発で呼び出せるようにする。**ファイルを一切変更しない。**
@@ -25,10 +26,10 @@ allowed-tools: Bash
    ```bash
    python3 scripts/metrics.py --markdown
    ```
-2. 出力をそのままユーザーに提示する（要約や言い換えをしない。CLAUDE.md の注記
-   「手で書かない」と同じ理由——実測値と手で書いた値がずれる事故を防ぐ）。
-3. コマンドが失敗した場合（exit code が 0 以外）は、標準エラー出力をそのまま提示し、
-   `scripts/metrics.py` の存在確認（`ls scripts/metrics.py`）を促す。
+2. 出力をそのままユーザーに提示する（要約や言い換えをしない）。
+3. exit code が 0 以外なら、**テストが失敗している**（v15.1 から pytest の失敗で exit 1 になる。
+   表の「failed 件数」「exit code」の行と、標準エラー出力の `ERROR:` 行をそのまま提示する）か、
+   スクリプト自体が動いていない（`ls scripts/metrics.py`）。数値を書き写す前に原因を直す。
 
 ## 入力
 

@@ -14,7 +14,7 @@ Builder / Validator パターンによる品質担保を行いながら、SDD（
   - `--review-only`：実行をスキップし、既存出力のみをレビュー
   - `--no-validation`：Validator エージェントをスキップ（高速だが品質低下）
   - `--output-dir`：出力ディレクトリを指定（デフォルト: `./outputs/`）
-  - **`--parallel`**（R-24 / Phase 14。**実験的**）：`depends_on` で依存関係のないフェーズを
+  - **`--parallel`**（**実験的**）：`depends_on` で依存関係のないフェーズを
     同一レベルとみなし、Builder を同時に起動する。**指定しない限り既定は従来どおりの逐次実行**
     （後方互換。Strategy 1/2/3 は無変更）。詳細は「Phase 0: 準備」Step 0.3 と
     「パフォーマンス最適化 / 並列実行」を参照
@@ -50,18 +50,17 @@ Builder / Validator パターンによる品質担保を行いながら、SDD（
 **Step 0.3: 依存関係バリデーション**
 
 要求された各フェーズについて:
-- **依存関係の決定（R-24 / Phase 14）**: `metadata.json` の `phases.{N}.depends_on`（整数配列）を読む。
-  存在しない場合は既定値 `[N-1]`（従来どおりの直列依存。Phase 1 は `[]`）にフォールバックする。
-  **既存フェーズ（01〜14）はいずれも明示的な `depends_on` を持たない**ため、この既定値により
-  従来の挙動は一切変わらない（後方互換）。例（`docs/plan.md` が記す Phase 03/04 の関係を
-  `depends_on` で表すなら）:
+- **依存関係の決定**: `metadata.json` の `phases.{N}.depends_on`（整数配列）を読む。
+  存在しない場合は既定値 `[N-1]`（直列依存。Phase 1 は `[]`）にフォールバックする。
+  `phases` は辞書（キーはフェーズ番号の文字列。`/init-task` ステップ3.2）。例（Phase 3 と 4 が
+  どちらも Phase 2 にのみ依存する場合）:
   ```json
   "phases": {
     "3": {"status": "completed", "depends_on": [2]},
     "4": {"status": "completed", "depends_on": [2]}
   }
   ```
-  （Phase 03 と 04 はどちらも Phase 02 にのみ依存し、互いには依存しない＝並列実行の候補になれる）
+  （Phase 3 と 4 は互いに依存しない＝並列実行の候補になれる）
 - 前提フェーズ（`depends_on` の各要素）が完了しているか確認
 - 依存が欠けている場合は、以下のいずれか:
   - 前提フェーズを自動実行（ユーザー確認あり）、または
@@ -85,22 +84,33 @@ Builder エージェントを以下の条件で起動:
 3. 手順をステップバイステップで実行
 4. 成果物を生成
 5. `./outputs/phase-{N}/` に保存
-6. `./outputs/phase-{N}/.metadata.json` を作成:
+6. `./outputs/phase-{N}/.metadata.json` を作成（形式の詳細は `.claude/agents/builder.md`「Builder → Validator の引き継ぎ」）:
 ```json
 {
   "phase": {N},
   "builder_session_id": "{uuid}",
   "started_at": "{ISO timestamp}",
   "completed_at": "{ISO timestamp}",
+  "docs_referenced": ["docs/requirements.md"],
+  "requirements_addressed": ["R-01", "R-02"],
   "deliverables": [
     {
       "file": "report.md",
       "type": "document",
       "status": "pending_validation"
     }
-  ]
+  ],
+  "revision_history": []
 }
 ```
+   `requirements_addressed` は `/analyze`（`scripts/trace_check.py`）が読む唯一の申告
+   （`docs/rules-reference/requirement-id-convention.md` §5）。
+
+**Builder を 2 段階で起動する（設計判断を含むフェーズで推奨）**:
+設計を変える・規約や表（エラーコード一覧、状態遷移など）を新しく決める・権限や安全に関わるフェーズでは、
+Builder に**まず方針（10 行程度の決定と、検証方法）だけを書かせて止め**、メインセッションまたは
+オーナーが確認してから実装に進ませる。**規約を先に決めてから実装する**ためである
+（ツールキット開発・別製品の開発のどちらでも、規約先行のフェーズは修正 0〜1 巡、逆順のフェーズは 3 巡以上だった）。
 
 **Step 1.2: Builder 出力の取り込み**
 - 生成された全ファイルを収集
@@ -119,7 +129,8 @@ python3 scripts/validate-outputs.py --phase {N}
 このスクリプトは以下を自動検証する：
 1. **成果物ディレクトリ存在**: `outputs/phase-{N}/` が存在するか
 2. **メタデータ完全性**: `.metadata.json` が存在し、必須フィールド（phase, deliverables）があるか
-3. **成果物ファイル存在**: 隠しファイル以外の成果物が1つ以上あるか
+3. **成果物ファイル存在**: 隠しファイル以外の成果物が1つ以上あるか。`.metadata.json` の `deliverables` に
+   挙げたファイルがすべて存在し、空（0 バイト）でないか（v15.1。Gate 0 は免除不可）
 4. **SKILL.md Quality Criteria**: Quality Criteria セクションの項目数を確認
 5. **カテゴリ別必須セクション**: metadata.json の category に基づき、テンプレートの必須セクションがキーワードベースで存在するか
 
@@ -166,8 +177,16 @@ Validator は SKILL.md の Quality Criteria の **全項目** を1つずつ検�
 Validator エージェントを以下の条件で起動:
 - コンテキスト：`CLAUDE.md`、`docs/`、`skills/phase-{N}/SKILL.md`
 - Builder の出力：`./outputs/phase-{N}/`
-- ツール：**読み取り専用（ファイル変更不可）**
+- ツール：**成果物を変更しない**。検証コマンドの実行は可、書き込みは `outputs/phase-{N}/.validation/` の中だけ
+  （`.claude/agents/validator.md`「ツールアクセス権限」）
 - 目的：成果物がすべての要件を満たしているか検証
+- **巡番号 R を渡す**（初回 R=1。修正サイクル後の再検証ごとに +1）。Validator は報告を
+  `report-round{R}.md` に書く（Step 2.2）
+
+**セッションを再開した場合は、Validator・専門家を起動する前に、前のセッションで起動した
+エージェントがまだ動いていないか確認する**（実行中のエージェントの一覧、`.validation/` の最新の
+更新時刻）。二重に起動すると、後から起動した方が `hashes-before.txt` を上書きし、先の方の
+事前/事後の比較が意味を失う（別製品の開発工程で実際に起きた）。
 
 **Validator エージェントの責務**
 1. `SKILL.md` の品質基準（quality criteria）を読む
@@ -197,10 +216,18 @@ PYTHONDONTWRITEBYTECODE=1 find outputs/phase-{N} -type f -not -path '*/__pycache
 ```
 
 **Step 2.2: 検証レポートの形式**
-`./outputs/phase-{N}/.validation/report.md` に保存:
+
+**巡ごとに別ファイルへ保存し、過去の巡を上書きしない**:
+
+1. `./outputs/phase-{N}/.validation/report-round{R}.md` に書く（既に同名があれば書かない。R を確認する）
+2. 同じ内容を `./outputs/phase-{N}/.validation/report.md` にも書く（最新の巡。検査スクリプトはこちらを読む）
+
+> **なぜ**: `report.md` だけを上書きする運用では、フェーズ完了時のコミットに最終巡しか残らない。
+> 別製品の開発工程（v15 で 20 フェーズ）では 4 フェーズで過去巡の原文が消え、修正サイクルの原因分析
+> （「前の巡の修正が次の指摘を生んだか」）ができなかった。
 
 ```markdown
-# Validation Report: Phase {N}
+# Validation Report: Phase {N} — Round {R}
 
 **Validator Session**: {uuid}
 **Timestamp**: {ISO timestamp}
@@ -228,28 +255,37 @@ PYTHONDONTWRITEBYTECODE=1 find outputs/phase-{N} -type f -not -path '*/__pycache
 - [⚠] Criterion 2: ...
 
 ## Executed Verification
-<!-- Phase 03 以降は必須（docs/io-spec.md §2.6, docs/constitution.md 第1条）。Step 2.3 で記録する -->
+<!-- 全フェーズ必須（docs/io-spec.md §2.6, docs/constitution.md 第1条）。Step 2.3 で記録する -->
 | # | コマンド | exit code | 要約(pass/fail 数) | ログ位置 |
 |---|---------|-----------|-------------------|---------|
-| 1 | `python3 -m pytest scripts/ -q` | 0 | 12 passed | verification.log:1-14 |
+| 1 | `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest tests/ -q -p no:cacheprovider` | 0 | 12 passed | verification.log:1-14 |
 | 2 | `diff outputs/phase-{N}/.validation/hashes-before.txt outputs/phase-{N}/.validation/hashes-after.txt` | 0 | 差分なし（Builder 成果物は不変） | verification.log:15 |
 
-<!-- M5（Phase 14）: 「検証前後のハッシュ照合: sha256sum 一致」という自主申告の1文は使わない。
+<!-- 「検証前後のハッシュ照合: sha256sum 一致」という自主申告の1文は使わない。
      上表の行（実行したコマンドと exit code）がハッシュ照合の証跡そのものである。 -->
 
-## Detailed Findings
+## Critical Issues
 
-### Critical Issues (must fix)
-1. {Issue description}
-   - Location: {file}:{line}
-   - Expected: {what was expected}
-   - Actual: {what was found}
-   - Fix: {how to address}
+<!-- 1 件 1 見出し（### Issue #N）。フィールドは .claude/rules/builder-validator.md Validator Rule 3。
+     scripts/check_fix_cycle.py が Gate 欄を検査する。Critical が無ければ「**なし。**」と書く -->
 
-### Suggestions (nice to have)
-1. {Suggestion description}
-   - Benefit: {why this improves quality}
-   - Effort: {low/medium/high}
+### Issue #1: {一行の要約}
+- **Gate**: {0 / 1 / 2}（`3-only` は Critical にしない。Suggestions へ）
+- **Location**: {file}:{line}
+- **Problem**: {何が問題か}
+- **Required by**: {docs/ の要件 ID・節、または SKILL.md Quality Criteria の項目}
+- **Current state**: {実際の状態}
+- **Expected**: {期待される状態}
+- **Fix**: {具体的な修正方法}
+- **Priority**: {High / Medium}
+
+## Suggestions
+
+### Suggestion #1: {一行の要約}
+- **Gate**: {3-only など}
+- **Location**: {file}:{line}
+- **Benefit**: {なぜ良くなるか}
+- **Effort**: {low/medium/high}
 
 ## Summary
 - Total Requirements: {N}
@@ -300,6 +336,52 @@ PYTHONDONTWRITEBYTECODE=1 find outputs/phase-{N} -type f -not -path '*/__pycache
 - **`docs/tech-stack.md` §4 に定義された当該フェーズのコマンドのうち、`## Executed Verification` に
   行が存在しないものがある → 「未実行: `<command>`」を Critical Issues に追加し PASS にできない**
 
+**Step 2.4.1: 報告の事後検査（メインセッションが実行する）**
+
+Validator が報告を書き終えたら、メインセッションが次の 2 つを実行する。どちらかが exit 0 でなければ、
+報告の書式か判定に誤りがある。Validator に差し戻す（成果物の修正サイクルとは数えない）。
+
+```bash
+python3 scripts/validate-outputs.py --phase {N} --require-verification   # exit code 列と Overall Status の整合
+python3 scripts/check_fix_cycle.py --phase {N}                           # Gate 欄・3-only・opened_by・打ち切り規則
+```
+
+> Step 1.5 のプリチェックは Builder 直後（報告がまだ無い時点）に走るため、`Executed Verification` の
+> 整合はここで初めて検査される。v15.0 はこの事後検査を手順に持たず、規則だけがあって実行されていなかった。
+
+**Step 2.5: 専門家レビュー（任意。`docs/team.md` とこのフェーズの実際の変更で決める）**
+
+`/init-task` が `.claude/agents/generated/` に召喚した専門家（security / architect / QA / doc-editor など）は、
+Validator とは別の種類の欠陥を見つける。別製品の開発工程（v15 で 20 フェーズ）の記録では、
+**Validator が PASS を出した後に専門家が実害のある指摘を出した例が 6 フェーズ**あり、
+記録に残った指摘のうち「放置すれば欠陥として残った」ものの割合は security が最も高く、architect が続いた
+（参考値。対象と工程が違えば変わる）。
+
+1. **誰を呼ぶか**: `docs/team.md` の「いつ/何のために呼ぶか」と、**このフェーズの実際の変更**
+   （`git status --porcelain --untracked-files=all` の出力。計画や自己申告ではなく実物。
+   `git diff --name-only` は**新規作成した未追跡ファイルと `git add` 済みの変更を含まない**ので使わない）
+   から決める。例: 認証・権限・外部入力・
+   シェル実行・ファイル書き込みに触れる → security、モジュール境界・スキーマ・公開インターフェース → architect、
+   テスト・検証コマンド → QA。**全員を毎回呼ぶことを既定にしない**（小さな変更にはコストが見合わない）。
+   メインセッションはいつでも追加してよい。減らすときは理由を `.metadata.json` に残す。
+   **過去の High への対応を含む変更なら、それを出した専門家は必ず呼ぶ**
+2. **いつ**: Validator と**同じ巡で並行して**起動する（同じ応答の中で複数のエージェントを起動する）。
+   Validator の PASS を待ってから呼ぶと、指摘が 2 巡目に偏り、巡が 1 つ増える
+3. **出力**: 各専門家は指摘を**自分で** `outputs/phase-{N}/.validation/expert-<agent>-round{R}.md` に書く
+   （サブディレクトリにしない。`.claude/rules/file-conventions.md` の 3 階層まで）。
+   形式は Validator の Critical Issue と同じ（`Location` / `Required by`（無ければ「無し」） / `Current` /
+   `Expected` / `Fix` / 重大度 High・Medium・Low / `Gate` / **再現手順**（そのまま実行できる形））。
+   **メインセッションや `change-report.md` で一行要約に圧縮しない**（参照だけを書く）。
+   別製品の開発工程では、この原文が 10 フェーズすべてで残っておらず、後から「仕様に書かれていたか」を
+   判定できなかった。原文を残すと、Validator が専門家の指摘を読んで独立に再現できる
+4. **判定**: フェーズの判定は、Validator と、起動した専門家**全員**が返ってから行う。
+   Validator の PASS 単独を判定にしない
+5. **High はメインセッションが自分で再現してから** Builder に渡す。再現できない・主張が過大なものは
+   理由を添えて差し戻す。`Required by` が「無し」の指摘は Critical にしない（Suggestion。
+   `.claude/rules/builder-validator.md` Validator Rule 2 と同じ）。
+   ただし**出荷される成果物が事実と違うことを述べている**なら、`Required by` は Gate 1（docs の要件に
+   反する誤情報）として扱う
+
 ### Phase 3: 修正ループ（必要なら）
 
 **Step 3.1: 検証結果をユーザーに提示**
@@ -317,37 +399,84 @@ Options:
 4. Accept: 問題が残っていても先へ進む
 ```
 
+**修正サイクルを開く前の仕分け**（メインセッション）:
+
+- **形式・作法だけの指摘**（引用位置・見出し番号・書式・用語・内部 ID の混入など、内容の正しさに
+  関わらないもの）は修正サイクルを開かない。Suggestion として `findings-register.md`
+  （`templates/findings-register.md`）に移す。**例外: 出荷される成果物が事実と違うことを述べている**
+  なら、形式に見えても内容の欠陥として扱う（その場で直す）
+- 修正サイクルを開くなら、その**根拠**を決める。`.metadata.json` の `revision_history[]` の新しい要素に
+  `opened_by` として記録させる: `validator_critical`（Validator の Critical）／ `expert_defect`
+  （専門家の指摘。`.validation/expert-<agent>-round{R}.md` の ID を添える）／ `owner_decision`
+  （オーナーが直すと決めた。理由を 1 文）／ `main_session`（メインセッションの自己検証）。
+  **Validator が Critical 0 で PASS でも、専門家の指摘やオーナー決定で開くサイクルは正当**。
+  違反は根拠が書かれていないことだけ（`scripts/check_fix_cycle.py` が検査する）
+
 **Step 3.2: Auto-fix 実行**
 ユーザーが auto-fix を選んだ場合:
 1. Builder エージェントを再起動:
    - 元のコンテキスト
-   - 追加入力として検証レポート
-   - タスク:「クリティカル問題のみ修正」
-2. Builder が成果物を修正
-3. `./outputs/phase-{N}/` に保存（上書きまたはバージョン付与）
-4. Validator を再実行
+   - 追加入力として検証レポート（`report-round{R}.md`）と、対象にする専門家の指摘ファイル
+   - タスク:「指摘された箇所のみ修正」。`opened_by` を渡す
+2. Builder が成果物を修正し、`.metadata.json` の `revision_history[]` に要素を足す
+   （`cycle` / `opened_by` / `changes`。`.claude/agents/builder.md`「パターン3」）
+3. **Builder は報告の前に、指摘を見つけた検査を同じ形で再実行する**（`.claude/agents/builder.md`
+   「修正後の再検査」）。再実行したコマンドと exit code が報告に無ければ、Validator を起動しない
+4. Validator を再実行（巡番号 R+1。前の巡の `report-round{R}.md` を読ませる）。
+   直前の巡で指摘を出した専門家は、その指摘の再検証のために再度起動する
 5. PASS になるか最大2回まで反復
 
-**Step 3.3: 反復回数の上限**
-2回の Builder/Validator サイクル後:
-- まだ NEEDS_REVISION の場合 → ユーザーへエスカレーション
-- 残課題を表示
-- 「auto-fix を継続するか、手動に切り替えるか」を質問
+> **なぜ再検査を先にするか**: 別製品の開発工程の記録では、2 巡目以降の指摘 66 件のうち
+> **25 件（37.9%）が前の巡の修正そのものが生んだ回帰**だった（直したことで別の記録・文言が古くなる型）。
+> 巡を駆動していたのは新しい欠陥ではなく回帰である。
+
+**小さな指摘はレビューの巡を回さずに閉じてよい**: 次を**すべて**満たすとき、メインセッションが
+修正を確認して閉じ、Validator・専門家の巡をやり直さなくてよい。
+
+- **直前の Validator の判定が PASS（Critical 0）**で、閉じる対象が Suggestion・形式だけの指摘・
+  専門家の Medium / Low・記録（`change-report.md`・`verification.log`・`.metadata.json`・登録簿）の訂正に限られる。
+  **Validator の Critical と専門家の High の修正には使えない**（文書が成果物のプロジェクトでは
+  「文書だけの変更」がそのまま成果物の変更なので、変更の種類ではなく指摘の種類で決める）
+- 変更が `.metadata.json` の `deliverables` に挙げた成果物の**内容の主張**（結論・数値・要件への対応）を変えない。
+  変えるなら Validator の巡を回す
+- 変更したファイルを `git status --porcelain --untracked-files=all` の実出力で確かめる（自己申告にしない）
+
+ただし**機械検査（Step 2.3 の検証コマンド、Step 2.4.1 の事後検査、成果物ハッシュ）は必ず回し直す**。
+閉じたときは `revision_history` に `opened_by`（`main_session` か `owner_decision`）・`changes`・`rechecked` を書き、
+条件を満たした証拠（上の `git status` の出力と機械検査の exit code）を `verification.log` に**追記**する。
+Validator の報告（`.validation/`）は Validator の書き込み先なので、メインセッションは書き換えない。
+
+**Step 3.3: 反復回数の上限と打ち切り**（`.claude/rules/builder-validator.md` Fix Cycle Limits）
+
+- **止めてよい条件**: Gate 0〜2 と機械検査（Step 2.3・Step 2.4.1）がすべて green。
+  Gate 3-only の指摘は止める理由にならない（Suggestion として登録簿へ）
+- 自動の修正サイクルは 2 回まで。2 回の Builder/Validator サイクル後もまだ NEEDS_REVISION なら
+  ユーザーへエスカレーションし、残課題と**根本原因**（SKILL.md の指示不足／docs/ の矛盾／
+  Builder と Validator の解釈の食い違い）を示す。見つかった箇所を 1 つずつ直すと同じ欠陥クラスの
+  隣の箇所が次の巡で見つかるので、3 巡目に入る前に欠陥クラスを名指しする
+- **3 巡目以降は、毎巡「続けて直す」と「現状を受け入れて先へ進む」を対等な選択肢として示す**。
+  どちらを選んだかと理由を、`revision_history` の最後の要素の `owner_decision` に書く
+  （書かないと `scripts/check_fix_cycle.py` が fail する）
 
 ### Phase 4: 完了処理
 
 **Step 4.1: ステータス更新**
-`./outputs/phase-{N}/.metadata.json` を更新:
+`./outputs/phase-{N}/.metadata.json` を更新（**既存のフィールドは残し、次を足す・書き換えるだけ**。
+`revision_history` や `requirements_addressed` を消さない）:
 ```json
 {
   "phase": {N},
   "status": "completed",
   "validation_status": "pass",
-  "iterations": 1,
+  "validation_rounds": 1,
   "completed_at": "{ISO timestamp}",
-  "deliverables": [...]
+  "deliverables": [...],
+  "requirements_addressed": [...],
+  "revision_history": [...]
 }
 ```
+`validation_rounds` は Validator の巡の数（`report-round{R}.md` の最大の R）。修正サイクルの数は
+`revision_history` の要素数で、両者は 1 ずれることが多い。
 
 ルートの `./metadata.json` を更新:
 ```json
@@ -381,6 +510,9 @@ Phase完了時に `./outputs/.phase-context.json` を作成/更新する。
 ```
 
 このファイルはフェーズ完了ごとに上書きされる（最新フェーズの情報のみ保持）。
+**したがって `pending_issues` に書いただけの指摘は次のフェーズの完了で消える。** 先送りする指摘
+（Suggestion、先送りした専門家の指摘）は `findings-register.md` に ID 付きで移し、
+`pending_issues` にはその ID だけを書く（`templates/findings-register.md`）。
 
 **Step 4.1.6: CLAUDE.md の Next Session Starter 更新**（C-31。オーナー決定 2026-09-03）
 `.claude/rules/file-conventions.md` は CLAUDE.md を「Phase completion」で更新すると定めている。
@@ -388,8 +520,10 @@ Phase完了時に `./outputs/.phase-context.json` を作成/更新する。
 
 - **現在地**: 完了したフェーズ番号・名称・commit ハッシュ
 - **次にやること**: 次の `/run-phase N`（全フェーズ完了なら `/finalize`）
-- **次フェーズ開始前の必須確認**: D-01（settings/hooks/skills を変更した場合）など
-- **現時点の実測値**: テスト件数、主要な検証コマンドの結果
+- **次フェーズ開始前の必須確認**: `.claude/`（settings / hooks / skills / agents / rules）を変更した場合は、
+  次のフェーズを**新しいセッション**で始め、変更が読み込まれたことを確かめる（同じセッションでは古い定義のまま動く）
+- **現時点の実測値**: テスト件数、主要な検証コマンドの結果（**コマンドを実行して出力から書く**。
+  記憶や前回の値を書き写さない）
 - **未解決の判断事項**: オーナー判断待ちの項目
 
 `.phase-context.json` と食い違う場合は `.phase-context.json` を正とする旨を明記すること。
@@ -447,12 +581,18 @@ range内の各フェーズについて:
   2. プリチェックを実行
   3. ファストパス判定:
      - ファストパス適用可 → 軽量検証 → PASS なら自動で次へ
-     - ファストパス不可 → Validator フル検証
-  4. PASS → 自動で次フェーズへ（ユーザー確認なし）
+     - ファストパス不可 → Validator フル検証（+ Step 2.5 の専門家）
+  4. PASS → 自動で次フェーズへ（ユーザー確認なし）。ただし下記の例外
   5. NEEDS_REVISION → 一時停止してユーザー確認
 ```
 
 Strategy 3 は Strategy 1 と Strategy 2 の中間。ファストパスが効くフェーズは高速に通過し、問題があるフェーズだけ停止する。
+
+**例外（v15.1）: コードを変更するフェーズ（`small_implementation`、または `.claude/`・`scripts/` を変更したフェーズ）は、
+PASS でも自動で次へ進まず、結果の要約（変更ファイル・検証コマンドの結果・残った Suggestion）を示して確認を取る。**
+PASS 後に専門家が実害のある指摘を出す例が繰り返し起きており、実装を積み重ねてから気づくと手戻りが大きい
+（別製品の開発工程では 20 フェーズすべてを 1 フェーズずつ回した）。`.claude/` を変更したフェーズの後は、
+次のフェーズを新しいセッションで始める（Step 4.1.6）。
 
 ## エラーハンドリング
 
@@ -473,54 +613,18 @@ Strategy 3 は Strategy 1 と Strategy 2 の中間。ファストパスが効く
 
 フェーズを完了とマークする前に:
 - [ ] `SKILL.md` に指定された成果物がすべて存在
-- [ ] Validator が正常に実行された（または `--no-validation` を使用）
+- [ ] Validator が正常に実行された（または `--no-validation` を使用）。起動した専門家も全員返っている
 - [ ] クリティカルな検証問題が残っていない
+- [ ] Step 2.4.1 の事後検査（`validate-outputs.py --require-verification`・`check_fix_cycle.py`）が exit 0
+- [ ] 先送りした指摘が `findings-register.md` に ID 付きで移っている
 - [ ] `metadata.json` が更新されている
 
 ## Builder / Validator エージェント定義
 
-**Builder エージェント**（`.claude/agents/builder.md`）:
-```yaml
-name: SDD Builder
-role: Generate deliverables according to SKILL.md
-tools:
-  - bash_tool (full access)
-  - str_replace
-  - create_file
-  - view
-constraints:
-  - Must follow SKILL.md procedure exactly
-  - Must save outputs to designated directory
-  - Must not skip quality criteria from SKILL.md
-context_priority:
-  1. skills/phase-{N}/SKILL.md
-  2. docs/ (all files)
-  3. CLAUDE.md
-  4. Previous phase outputs
-```
-
-**Validator エージェント**（`.claude/agents/validator.md`）:
-```yaml
-name: SDD Validator
-role: Verify deliverables against requirements
-tools:
-  - view (read-only)
-  - bash_tool (read-only commands: cat, grep, find, wc)
-constraints:
-  - Cannot modify any files
-  - Cannot generate new content
-  - Must reference specific requirements from docs/
-  - Must provide actionable feedback
-context_priority:
-  1. skills/phase-{N}/SKILL.md (quality criteria)
-  2. docs/ (all files)
-  3. Builder deliverables
-evaluation_criteria:
-  - Completeness: All requirements addressed?
-  - Accuracy: Correct interpretation of requirements?
-  - Format: Follows specified structure?
-  - Quality: Meets professional standards?
-```
+定義の正は `.claude/agents/builder.md`（`sdd-builder`）と `.claude/agents/validator.md`（`sdd-validator`）の
+frontmatter と本文である。ここには複製しない（v15.0 はここに古い定義を複製しており、Validator を
+「読み取り専用コマンドのみ」と書いて、検証コマンドを実行させる本文・Step 2.3 と食い違っていた）。
+専門家は `/init-task` が `.claude/agents/generated/` に生成したもの（`templates/agents/*.md` が原本）。
 
 ## パフォーマンス最適化
 
@@ -529,34 +633,26 @@ evaluation_criteria:
 - 各フェーズは自分の `SKILL.md` のみを読み込む
 - 前フェーズ出力は必要時のみオンデマンドで読み込む
 
-**並列実行（R-24 / Phase 14。`--parallel` 指定時のみ。既定は従来どおり逐次）**
+**並列実行（`--parallel` 指定時のみ。**実験的**。既定は逐次）**
 
 1. `metadata.json` の `phases.{N}.depends_on` から依存グラフを作り、トポロジカルソートで
    「レベル」（互いに依存しないフェーズの集合）を求める（Step 0.3 参照）。`depends_on` 未指定の
-   フェーズは既定値 `[N-1]` を使う（後方互換。既存 Phase 01〜14 はすべてこの既定値のまま）
+   フェーズは既定値 `[N-1]` を使う
 2. 同一レベル内のフェーズについて、メインセッションが `Task(subagent_type="sdd-builder", ...)` を
-   **同一の応答ブロック内で複数回**呼び出す。Claude Code は依存のない複数のツール呼び出しを
-   同一ターン内で並行実行する（本 SKILL.md を書いた Builder セッション自身が、Read / Bash を
-   同一ブロックで複数回呼び出し並行して結果を得られることを実地で確認済み。
-   `outputs/phase-14/change-report.md` §3）。**ただし Task/Agent ツールでの並行実行そのものは
-   Builder には検証できない**（Builder には Task/Agent ツールの割当てがない。
-   `outputs/phase-01/inventory.md` C-15 と同じ制約）。**次回 `--parallel` を実際に使う際は、
-   オーナーセッション側でまず2フェーズ分を同一ブロックで起動し、開始・終了時刻が重なることを
-   確認してから本番投入すること**（第8条: 確認してから使う。未検証のまま既定動作にはしない）
+   **同一の応答ブロック内で複数回**呼び出す。Claude Code は同じ応答の中の独立したツール呼び出しを
+   並行実行する。**ただしサブエージェントの並行起動が実際に重なって動くかは、Claude Code の版と
+   環境で確かめていない**。初めて使うときは 2 フェーズ分で起動し、各 Builder の開始・終了時刻が
+   重なることを確かめてから使う（確かめるまでは既定の逐次で回す）
 3. **共有ファイルへの書き込みは並行実行中の Builder 自身が行わず、全 Builder 完了後にメインセッションが
    1つずつ順番に適用する**: `outputs/.phase-context.json`、ルート `metadata.json`、`CLAUDE.md` の
    Next Session Starter（Step 4.1 / 4.1.5 / 4.1.6）。各 Builder が書くのは自分の
    `outputs/phase-{N}/` 配下のみであり、レベル内のフェーズ同士では衝突しない
-4. Validator は従来どおり順次実行する（コンテキスト競合を避ける。変更なし）
-5. **検証済みだが本フェーズでは採用しない代替案**: `claude -p` の再帰的サブプロセス呼び出しによる
-   並列化（`eval/runner.py` と同じ機構）。2プロセスを隔離環境（cwd 隔離 + `--setting-sources user`）
-   で同時起動し、正しく並行動作し合計 wall-clock が直列実行の合計より短くなることを実測で確認した
-   （`outputs/phase-14/change-report.md` §4）。ただしこの方式は各サブプロセスを本プロジェクトの
-   `docs/` / `CLAUDE.md` / hooks から隔離する必要があり（`docs/io-spec.md` §6.4 の自己言及汚染問題）、
-   実際の Builder は逆にプロジェクト全体の文脈を必要とするため隔離と文脈確保が両立しない。
-   この設計は Iteration 4 以降の検討課題として残す（1 フェーズ 1 テーマ。D-03）
-6. **`--parallel` が使えない、または上記2の検証が済んでいない環境では、フラグを付けなければ
-   常に直列フォールバックする**（第8条・既定は後方互換。Strategy 1/2/3 は無変更）
+4. Validator は従来どおり順次実行する（コンテキスト競合を避ける）
+5. **採用しない代替案**: `claude -p` の再帰的サブプロセスによる並列化（`eval/runner.py` と同じ機構）。
+   ツールキット開発時に 2 プロセスの並行動作は実測したが、サブプロセスをプロジェクトの `CLAUDE.md` /
+   hooks / Auto Memory から隔離しないと与えたプロンプトを無視して自律的な調査を始める（README §5.3
+   「自己言及汚染」）。一方で Builder はプロジェクト全体の文脈を必要とするため、隔離と文脈確保が両立しない
+6. **フラグを付けなければ常に逐次**（Strategy 1/2/3 は無変更）
 
 **キャッシュ**
 - パース済み `SKILL.md` 要件をキャッシュ

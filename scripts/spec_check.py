@@ -58,13 +58,16 @@ ALLOWLIST_PATH = "docs/spec-check-allowlist.json"
 ALLOWLIST_DOC = "docs/spec-check-allowlist.md"
 
 # 参照の抽出。`/name` の直前が行頭・空白・開き括弧・バッククォート・全角の箇条書き記号のとき。
-# URL の途中（`.com/docs`）やファイルパス（`.claude/commands/x.md`）を拾わないため
-_REF = re.compile(r"(?:^|(?<=[\s`（(\[「『|・※●◆▪－★→]))/([a-z][a-z0-9:_-]*)")
-
-
-def _looks_like_path(token: str) -> bool:
-    """`run-phase.md` のような拡張子つきはコマンド名ではない。"""
-    return token.endswith((".md", ".py", ".json", ".sh", ".yaml", ".yml"))
+# URL の途中（`.com/docs`）やファイルパス（`.claude/commands/x.md`）を拾わないため。
+#
+# 直後の否定先読み（v15.1）: 名前の直後が `/`・ASCII 英数字・`_:-`、または `.` + ASCII 英数字なら
+# コマンドではない。v15.0 は `/home/user/x.sh` を `/home`、`/usr/bin/git` を `/usr`、
+# `/notes.md` を `/notes` としてコマンド扱いしていた（拡張子で除外するはずの `_looks_like_path()`
+# は、名前の文字クラスに `.` が無いため一度も真にならないデッドコードだった）。
+# ASCII に限るのは、日本語が直後に続く `/clarifyを` を従来どおりコマンドとして拾うため
+# （`\w` は日本語にも一致する）。文末の `/cmd.` は `.` の後が英数字でないので拾う。
+_REF = re.compile(r"(?:^|(?<=[\s`（(\[「『|・※●◆▪－★→]))/([a-z][a-z0-9:_-]*)"
+                  r"(?![A-Za-z0-9_/:-]|\.[A-Za-z0-9])")
 
 
 def load_allowlist(root: str) -> list:
@@ -89,7 +92,7 @@ def load_allowlist(root: str) -> list:
     except Exception:
         return []
     out = []
-    for e in data.get("entries", []):
+    for e in data.get("entries", []) if isinstance(data, dict) else []:
         if not isinstance(e, dict):
             continue
         ref, scope, reason = e.get("ref"), e.get("scope"), e.get("reason")
@@ -97,6 +100,71 @@ def load_allowlist(root: str) -> list:
             continue
         out.append({"ref": str(ref).lstrip("/"), "scope": str(scope), "reason": str(reason)})
     return out
+
+
+def _load_allowlist_section(root: str, key: str, field: str) -> list:
+    """許可リスト JSON の `excludes` / `resolve_roots` を読む（v15.1）。
+
+    `entries` と同じく**理由（reason）が空の要素は無効**。`"*"` は無効（検査全体を
+    黙って止める経路になるため）。値は宣言の順に返す。
+    """
+    p = Path(root) / ALLOWLIST_PATH
+    if not p.is_file():
+        return []
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    out = []
+    for e in data.get(key, []) if isinstance(data, dict) else []:
+        if not isinstance(e, dict):
+            continue
+        value, reason = e.get(field), e.get("reason")
+        if not value or not reason or str(value).strip() in ("*", ".", "/"):
+            continue
+        out.append(str(value).strip().rstrip("/"))
+    return out
+
+
+def load_excludes(root: str) -> list:
+    """走査しないファイル・ディレクトリ（`excludes[].scope`）。
+
+    **履歴の記録**（`docs/CHANGELOG.md` など、過去に存在したファイルへの言及が正しい文書）を
+    1 件ずつ許可するのではなく、ファイル単位で対象外にする。対象外にしたファイル数は
+    毎回出力に表示する（抑制が見えなくならないように）。
+    """
+    return _load_allowlist_section(root, "excludes", "scope")
+
+
+def load_resolve_roots(root: str) -> list:
+    """ファイル参照の追加の解決先（`resolve_roots[].path`。プロジェクトルートからの相対）。
+
+    製品を別リポジトリ（例: `product/app/`）に置き、仕様がその中のパスを製品ルート相対で
+    書くプロジェクトのため。プロジェクトルートで見つからない参照を、宣言した順に各ルートで探す。
+    """
+    return _load_allowlist_section(root, "resolve_roots", "path")
+
+
+def is_excluded(rel_path: str, excludes: list) -> bool:
+    return any(_scope_matches(rel_path, s) for s in excludes)
+
+
+def _scanned_files(root: str, scan_dirs: list, excluded_out=None):
+    """走査対象の Markdown を (Path, 相対パス) で返す。許可リスト自体と `excludes` は除く。"""
+    excludes = load_excludes(root)
+    for d in scan_dirs:
+        base = Path(root) / d
+        if not base.is_dir():
+            continue
+        for p in sorted(base.rglob("*.md")):
+            rel = p.relative_to(root).as_posix()
+            if rel in (ALLOWLIST_PATH, ALLOWLIST_DOC):   # 許可リストとその説明は対象外
+                continue
+            if is_excluded(rel, excludes):
+                if excluded_out is not None:
+                    excluded_out.add(rel)
+                continue
+            yield p, rel
 
 
 def _scope_matches(rel_path: str, scope: str) -> bool:
@@ -162,75 +230,63 @@ def classify(name: str, rel_path: str, real: set, allowlist: list) -> str:
 DEFECT_KINDS = {"unresolved", "duplicate_id", "missing_id"}
 
 
-def check_command_references(root: str, scan_dirs=None) -> list:
+def check_command_references(root: str, scan_dirs=None, excluded_out=None) -> list:
     """仕様が参照するコマンドのうち、実在せず許可もされていないものを検出する。"""
     root = os.path.abspath(root)
     scan_dirs = scan_dirs or ["docs", "skills", ".claude/rules"]
     real = real_commands(root)
     allowlist = load_allowlist(root)
     findings = []
-    for d in scan_dirs:
-        base = Path(root) / d
-        if not base.is_dir():
-            continue
-        for p in sorted(base.rglob("*.md")):
-            rel = p.relative_to(root).as_posix()
-            if rel in (ALLOWLIST_PATH, ALLOWLIST_DOC):   # 許可リストとその説明は対象外
-                continue
-            for i, line in enumerate(
-                    p.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
-                for m in _REF.finditer(line):
-                    name = m.group(1)
-                    if _looks_like_path(name):
-                        continue
-                    kind = classify(name, rel, real, allowlist)
-                    if kind not in DEFECT_KINDS:
-                        continue
-                    findings.append({
-                        "check": "command_reference", "file": rel, "line": i,
-                        "reference": name, "kind": kind,
-                        "message": f"`/{name}` は `.claude/commands/` にも "
-                                   f"`.claude/skills/{name}/SKILL.md` にも存在せず、"
-                                   f"`{ALLOWLIST_PATH}` にも記載がない",
-                        "context": line.strip()[:120],
-                    })
+    for p, rel in _scanned_files(root, scan_dirs, excluded_out):
+        for i, line in enumerate(
+                p.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            for m in _REF.finditer(line):
+                name = m.group(1)
+                kind = classify(name, rel, real, allowlist)
+                if kind not in DEFECT_KINDS:
+                    continue
+                findings.append({
+                    "check": "command_reference", "file": rel, "line": i,
+                    "reference": name, "kind": kind,
+                    "message": f"`/{name}` は `.claude/commands/` にも "
+                               f"`.claude/skills/{name}/SKILL.md` にも存在せず、"
+                               f"`{ALLOWLIST_PATH}` にも記載がない",
+                    "context": line.strip()[:120],
+                })
     return findings
 
 
-def check_file_references(root: str, scan_dirs=None) -> list:
-    """仕様が参照するファイルパスのうち、実在せず許可もされていないものを検出する。"""
+def check_file_references(root: str, scan_dirs=None, excluded_out=None) -> list:
+    """仕様が参照するファイルパスのうち、実在せず許可もされていないものを検出する。
+
+    プロジェクトルートで見つからなければ `resolve_roots` の各ルートでも探す（v15.1）。
+    """
     root = os.path.abspath(root)
     scan_dirs = scan_dirs or ["docs", "skills"]
     pat = re.compile(r"`([a-zA-Z_][\w./-]*\.(?:md|py|json|yaml|yml|csv|sh))`")
     allowlist = load_allowlist(root)
+    bases = [Path(root)] + [Path(root) / r for r in load_resolve_roots(root)]
     findings = []
-    for d in scan_dirs:
-        base = Path(root) / d
-        if not base.is_dir():
-            continue
-        for p in sorted(base.rglob("*.md")):
-            rel = p.relative_to(root).as_posix()
-            if rel in (ALLOWLIST_PATH, ALLOWLIST_DOC):
-                continue
-            for i, line in enumerate(
-                    p.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
-                for m in pat.finditer(line):
-                    tgt = m.group(1)
-                    # 裸のファイル名（`change-report.md`）は通称であってパスではない
-                    if "/" not in tgt:
-                        continue
-                    if _PATH_PLACEHOLDER.search(tgt) or tgt.startswith("http"):
-                        continue
-                    if (Path(root) / tgt).exists():
-                        continue
-                    if is_allowed(tgt, rel, allowlist):
-                        continue
-                    findings.append({
-                        "check": "file_reference", "file": rel, "line": i,
-                        "reference": tgt, "kind": "unresolved",
-                        "message": f"`{tgt}` が存在せず、`{ALLOWLIST_PATH}` にも記載がない",
-                        "context": line.strip()[:120],
-                    })
+    for p, rel in _scanned_files(root, scan_dirs, excluded_out):
+        for i, line in enumerate(
+                p.read_text(encoding="utf-8", errors="replace").splitlines(), 1):
+            for m in pat.finditer(line):
+                tgt = m.group(1)
+                # 裸のファイル名（`change-report.md`）は通称であってパスではない
+                if "/" not in tgt:
+                    continue
+                if _PATH_PLACEHOLDER.search(tgt) or tgt.startswith("http"):
+                    continue
+                if any((b / tgt).exists() for b in bases):
+                    continue
+                if is_allowed(tgt, rel, allowlist):
+                    continue
+                findings.append({
+                    "check": "file_reference", "file": rel, "line": i,
+                    "reference": tgt, "kind": "unresolved",
+                    "message": f"`{tgt}` が存在せず、`{ALLOWLIST_PATH}` にも記載がない",
+                    "context": line.strip()[:120],
+                })
     return findings
 
 
@@ -295,7 +351,7 @@ def check_requirement_ids(root: str, scan_dirs=None) -> list:
                 "check": "requirement_id", "file": rel_path, "line": 0,
                 "reference": f"{prefix}-{missing:02d}", "kind": "missing_id",
                 "message": f"要件 ID `{prefix}-{missing:02d}` が欠番（最大は "
-                           f"`{prefix}-{max(nums):02d}`）。§9.2 は取り下げた ID も "
+                           f"`{prefix}-{max(nums):02d}`）。要件 ID 規約（docs/rules-reference/requirement-id-convention.md §2）は取り下げた ID も "
                            f"`~~{prefix}-{missing:02d}~~` と残すと定める",
                 "context": "",
             })
@@ -317,13 +373,21 @@ def main():
     args = ap.parse_args()
 
     root = os.path.abspath(args.project_dir)
+    if not os.path.isdir(root):
+        # 検査対象が無いのに「欠陥 0 件・OK」を返さない（v15.1）
+        print(f"ERROR: --project-dir {root} が存在しない", file=sys.stderr)
+        return 2
     names = args.check or list(CHECKS)
     findings = []
+    excluded = set()
     for n in names:
         if n not in CHECKS:
             print(f"unknown check: {n}", file=sys.stderr)
             return 2
-        findings.extend(CHECKS[n](root, args.scan_dirs))
+        if n in ("command_reference", "file_reference"):
+            findings.extend(CHECKS[n](root, args.scan_dirs, excluded))
+        else:
+            findings.extend(CHECKS[n](root, args.scan_dirs))
 
     if args.json:
         print(json.dumps(findings, ensure_ascii=False, indent=2))
@@ -334,6 +398,12 @@ def main():
         for f in findings:
             print(f"  ✗ [{f['kind']}] {f['file']}:{f['line']}  {f['message']}")
             print(f"      {f['context']}")
+        roots = load_resolve_roots(root)
+        if excluded or roots:
+            # 抑制を見えるようにする（許可リストの excludes / resolve_roots。v15.1）
+            print(f"\n  {ALLOWLIST_PATH} により: 走査対象外 {len(excluded)} ファイル"
+                  f"（{', '.join(sorted(excluded)) or '—'}） / 追加の解決先 {len(roots)} 件"
+                  f"（{', '.join(roots) or '—'}）")
         print(f"\nResult: {len(findings)} 件の欠陥")
         print("Status: " + ("DEFECT" if findings else "OK"))
     return 1 if findings else 0

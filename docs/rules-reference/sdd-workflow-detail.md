@@ -86,7 +86,7 @@ Specification-Driven Development（SDD）ワークフローの実行ルールを
 **修正サイクルルール:**
 - 最大2回まで自動修正
 - 3回目以降は手動介入必須
-- 各修正でmetadata.jsonのiterationをインクリメント
+- 各修正で `.metadata.json` の `revision_history` に要素（`cycle` / `opened_by` / `changes` / `rechecked`）を 1 つ足す
 
 **完了条件:**
 - [ ] outputs/phase-{N}/ に成果物が存在
@@ -296,7 +296,7 @@ Specification-Driven Development（SDD）ワークフローの実行ルールを
 
 ### エラー3: Validator検証が3回連続FAIL
 ```
-検出: 同一Phaseで iteration >= 3 かつ status = NEEDS_REVISION
+検出: 同一Phaseで revision_history が 3 件以上 かつ validation_status が pass でない（scripts/check_fix_cycle.py）
 対処:
   1. 自動修正を停止
   2. ユーザーに報告:

@@ -1,5 +1,7 @@
 # Phase {N}: {Phase Name}
 
+> 対応要件: {R-NN, R-NN}
+
 > このテンプレートは small_implementation カテゴリ用です。
 > プレースホルダー `{...}` を実際の値に置換してください。
 

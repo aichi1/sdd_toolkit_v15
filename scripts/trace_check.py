@@ -8,7 +8,9 @@ trace_check.py: 要件 → SKILL → outputs のトレーサビリティを機�
 
   対応表を出すだけなら目視と変わらない。**検出が要点**である。
 
-規約は `docs/requirements.md` §9。本スクリプトはその規約に従ってのみ ID を抽出する。
+規約は `docs/rules-reference/requirement-id-convention.md`（v15.0 まではツールキット開発
+プロジェクトの `docs/requirements.md` §9 にあった。以下の §9.x はその節番号）。
+本スクリプトはその規約に従ってのみ ID を抽出する。
 
   * §5 の表の行だけが R-ID の**定義**（散文の言及は定義ではない）
   * `> 対応要件:` で始まる**1 行だけ**が SKILL の**宣言**（本文の言及は宣言ではない）
@@ -96,12 +98,17 @@ def extract_requirements(root: str) -> dict:
         if not line.lstrip().startswith("|"):
             continue
         cells = [c.strip() for c in line.strip().strip("|").split("|")]
-        if len(cells) < 4:
-            continue
-        m = _ID_CELL.match(cells[0])
+        m = _ID_CELL.match(cells[0]) if cells else None
         if not m:
             continue
         rid = _norm(m.group(1))
+        if len(cells) < 4:
+            # 「実現フェーズ」列の無い要件行を黙って捨てない（v15.1。以前は `continue` で
+            # 読み飛ばし、要件が 1 件減ったまま OK を返していた）
+            out[rid] = {"id": rid, "text": cells[1] if len(cells) > 1 else "",
+                        "phase_cell": "", "phases": set(), "crosscut": False,
+                        "violation": f"列が {len(cells)} 個しかない（実現フェーズは 4 列目）"}
+            continue
         entry = {"id": rid, "text": cells[1], "phase_cell": cells[3]}
         try:
             entry["phases"], entry["crosscut"] = parse_phase_cell(cells[3])
@@ -146,7 +153,7 @@ def extract_output_claims(root: str) -> dict:
         except Exception:
             out[phase] = set()
             continue
-        vals = data.get("requirements_addressed") or []
+        vals = (data.get("requirements_addressed") or []) if isinstance(data, dict) else []
         ids = set()
         for v in vals if isinstance(vals, list) else []:
             m = re.fullmatch(r"R-(\d+)", str(v).strip())
@@ -154,6 +161,21 @@ def extract_output_claims(root: str) -> dict:
                 ids.add(_norm(m.group(1)))
         out[phase] = ids
     return out
+
+
+def _phase_entries(phases):
+    """`metadata.json` の `phases` を (フェーズ番号の文字列, 値) の列にする。
+
+    正の形は `{"1": {"status": ...}}`（辞書。`/init-task` ステップ3.2・`/run-phase` Step 4.1）。
+    v15.0 の `/init-task` は `phases` の形を規定しておらず、実プロジェクトで
+    `[{"phase": 1, "status": ...}]`（配列）が作られ、本スクリプトが AttributeError で
+    落ちた。**既存プロジェクトを壊さないよう配列も読む**。
+    """
+    if isinstance(phases, dict):
+        return list(phases.items())
+    if isinstance(phases, list):
+        return [(str(v.get("phase")), v) for v in phases if isinstance(v, dict)]
+    return []
 
 
 def completed_phases(root: str) -> set:
@@ -165,8 +187,10 @@ def completed_phases(root: str) -> set:
         data = json.loads(p.read_text(encoding="utf-8"))
     except Exception:
         return set()
+    if not isinstance(data, dict):
+        return set()
     done = set()
-    for k, v in (data.get("phases") or {}).items():
+    for k, v in _phase_entries(data.get("phases")):
         if isinstance(v, dict) and str(v.get("status", "")).startswith("completed"):
             try:
                 done.add(int(k))
@@ -199,6 +223,7 @@ def check_traceability(root: str) -> list:
     """未対応・孤立・不整合を検出する。
 
     kind の意味:
+      missing_section       requirements.md に §5 の見出しが無く 1 件も読めない（**欠陥**。v15.1）
       convention_violation  §9.3 に反する「実現フェーズ」の書き方（**規約違反。欠陥**）
       overdue               完了済みフェーズが担当のはずなのに宣言が無い（**欠陥**）
       orphan_skill          SKILL が宣言する ID が docs に無い（**欠陥**）
@@ -222,12 +247,24 @@ def check_traceability(root: str) -> list:
         findings.append({"check": "traceability", "reference": rid, "kind": kind,
                          "message": message, "phases": sorted(phases or [])})
 
+    # `docs/requirements.md` があるのに §5 の見出しが無い → 「要件 0 件・欠陥 0 件・OK」と
+    # 黙って通さない（v15.1）。v15.0 の `/init-task` はこの見出しを生成しておらず、
+    # 実プロジェクトで `/analyze` が何も検査せずに OK を返していた。
+    # ファイル自体が無い（`/init-task` 前のツールキット単体）は従来どおり 0 件で OK。
+    req_path = Path(root) / "docs" / "requirements.md"
+    if req_path.is_file() and _SECTION_5 not in req_path.read_text(
+            encoding="utf-8", errors="replace"):
+        add("docs/requirements.md", "missing_section",
+            f"`{_SECTION_5}` の見出しが無いため要件を 1 件も読めない。"
+            "見出しと表（`| ID | 要件 | 対応課題 | 実現フェーズ | 検証 |`）の規約は "
+            "`docs/rules-reference/requirement-id-convention.md`")
+
     for rid in sorted(known, key=lambda x: int(x.split("-")[1])):
         e = reqs[rid]
         if e["violation"] is not None:
             add(rid, "convention_violation",
-                f"「実現フェーズ」列が規約外のトークン `{e['violation']}` を含む"
-                f"（`docs/requirements.md` §9.3）", e["phases"])
+                f"「実現フェーズ」列が規約外: `{e['violation']}`"
+                f"（`docs/rules-reference/requirement-id-convention.md` §3.1）", e["phases"])
             continue
         if e["crosscut"] and not e["phases"]:
             add(rid, "crosscutting", "横断要件（`全` / `各フェーズ`）。特定フェーズの宣言を要求しない")
@@ -272,7 +309,7 @@ def check_traceability(root: str) -> list:
 
 
 # 欠陥として扱う分類（exit 1 になる）。planned / crosscutting は**欠陥ではない**
-DEFECT_KINDS = {"convention_violation", "overdue", "orphan_skill",
+DEFECT_KINDS = {"missing_section", "convention_violation", "overdue", "orphan_skill",
                 "orphan_output", "phase_mismatch", "not_delivered"}
 
 
@@ -299,6 +336,10 @@ def main():
     args = ap.parse_args()
 
     root = os.path.abspath(args.project_dir)
+    if not os.path.isdir(root):
+        # 検査対象が無いのに「欠陥 0 件・OK」を返さない（v15.1）
+        print(f"ERROR: --project-dir {root} が存在しない", file=sys.stderr)
+        return 2
     rows = build_matrix(root)
     findings = check_traceability(root)
     defects = [f for f in findings if f["kind"] in DEFECT_KINDS]
@@ -310,7 +351,7 @@ def main():
     else:
         print("=== Trace Check ===\n")
         print(f"  要件 {len(rows)} 件を検査した\n")
-        for kind in ("convention_violation", "overdue", "orphan_skill", "orphan_output",
+        for kind in ("missing_section", "convention_violation", "overdue", "orphan_skill", "orphan_output",
                      "phase_mismatch", "not_delivered", "planned", "assigned", "crosscutting"):
             hits = [f for f in findings if f["kind"] == kind]
             if not hits:

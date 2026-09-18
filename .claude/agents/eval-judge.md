@@ -41,11 +41,11 @@ model: sonnet
 - `Write` / `Edit` は `disallowedTools` で明示的に禁止
 
 `eval/runner.py` は本エージェントを直接 `claude -p --agent` では呼ばない。
-`docs/io-spec.md` §6.4 の理由（`--agent` がプロジェクト側のエージェント発見に依存する可能性を
-本フェーズでは検証していないため）により、本ファイルの本文を `--append-system-prompt` で渡し、
+`--agent` がプロジェクト側のエージェント発見に依存する可能性を検証していないため（README §5.3 の
+自己言及汚染と同じ懸念）、本ファイルの本文を `--append-system-prompt` で渡し、
 CLI フラグ `--tools Read,Glob,Grep` で技術的に読み取り専用を強制する形で呼び出す。
 **本ファイルは Judge の役割定義の唯一の正であり、`runner.py` はこの本文をそのまま読み込む**
-（`docs/constitution.md` 第9条の精神——指示は 1 箇所に書き、二重管理しない）。
+（指示は 1 箇所に書き、二重管理しない）。
 
 ## 出力形式
 

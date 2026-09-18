@@ -143,16 +143,7 @@
   "hooks": {
     "PostToolUse": [
       {
-        "matcher": "Write(outputs/**)",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/post-phase-complete.sh\" \"$CLAUDE_PROJECT_DIR\""
-          }
-        ]
-      },
-      {
-        "matcher": "Write(outputs/**/.metadata.json)",
+        "matcher": "Write",
         "hooks": [
           {
             "type": "command",
@@ -163,7 +154,7 @@
     ],
     "PreToolUse": [
       {
-        "matcher": "Write(outputs/**)|Edit(outputs/**)",
+        "matcher": "Write|Edit",
         "hooks": [
           {
             "type": "command",

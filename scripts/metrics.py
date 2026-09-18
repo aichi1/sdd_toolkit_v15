@@ -62,6 +62,36 @@ def count_articles(root: str) -> int:
     return len(re.findall(r"^## 第\d+条", s, re.MULTILINE))
 
 
+def count_tracked_files(root: str):
+    """`git ls-files docs skills .claude` の件数。git 管理外・git 不在なら None。
+
+    v15.1: 旧実装は `git ls-files ... | wc -l` をシェルで実行し、stderr を stdout に連結して int() していた。
+    git リポジトリの外では終了コードがパイプ末尾の wc の 0 になり、出力は
+    `0\\nfatal: not a git repository ...` となって **ValueError でスクリプトごと落ちていた**。
+    git 自身の終了コードを見るため、パイプを使わずリスト引数で呼ぶ。
+    """
+    try:
+        p = subprocess.run(["git", "ls-files", "docs", "skills", ".claude"], cwd=root,
+                           capture_output=True, text=True, encoding="utf-8", errors="replace")
+    except OSError:
+        return None          # git が無い
+    if p.returncode != 0:
+        return None          # git 管理外など
+    return len([ln for ln in p.stdout.splitlines() if ln.strip()])
+
+
+def pytest_failed_count(out: str, rc: int):
+    """pytest 出力の最終集計から failed 件数を返す（v15.1）。
+
+    `N failed` が無ければ、exit 0 なら 0、それ以外（収集エラー・中断など）は None（= 数えられない）。
+    **失敗したのに 0 を返して静かに通る**ことを避けるため、rc≠0 で 0 は返さない。
+    """
+    found = re.findall(r"(\d+) failed", out)
+    if found:
+        return int(found[-1])       # 最終行の集計（途中の FAILED 行の文言に引きずられない）
+    return 0 if rc == 0 else None
+
+
 def collect(root: str) -> dict:
     os.chdir(root)
     env = "PYTHONDONTWRITEBYTECODE=1 "
@@ -70,6 +100,7 @@ def collect(root: str) -> dict:
     rc, out = _run(env + "python3 -m pytest scripts/ -q")
     n = re.search(r"(\d+) passed", out)
     m["pytest_passed"] = int(n.group(1)) if n else None
+    m["pytest_failed"] = pytest_failed_count(out, rc)      # v15.1
     m["pytest_exit"] = rc
 
     for name, path in (("test_spec_check", "scripts/test_spec_check.py"),
@@ -113,13 +144,15 @@ def collect(root: str) -> dict:
     except Exception:
         m["constitution_articles"] = None
 
-    rc, out = _run("git ls-files docs skills .claude | wc -l")
-    m["tracked_files_docs_skills_claude"] = int(out.strip()) if rc == 0 else None
+    m["tracked_files_docs_skills_claude"] = count_tracked_files(root)
     return m
 
 
 LABELS = {
     "pytest_passed": "`python3 -m pytest scripts/ -q`",
+    # v15.1: passed 件数だけでは失敗が表から見えなかった。failed 件数と exit code を併記する
+    "pytest_failed": "`python3 -m pytest scripts/ -q` の failed 件数",
+    "pytest_exit": "`python3 -m pytest scripts/ -q` の exit code",
     "spec_check_findings": "`python3 scripts/spec_check.py` の検出件数",
     "allowlist_entries": "許可リストの有効エントリ数",
     "allowlist_forward_refs": "うち前方参照（作ったら消す）",
@@ -129,6 +162,10 @@ LABELS = {
     "constitution_articles": "`docs/constitution.md` の条数",
     "tracked_files_docs_skills_claude": "`git ls-files docs skills .claude`",
 }
+
+# 値が None（取得できない）でも行を省略せず `n/a` と出す指標（v15.1）。
+# 既存の行は従来どおり None なら省略する（表の見た目を変えない）。
+_ALWAYS_SHOWN = {"pytest_failed", "pytest_exit"}
 
 
 def main():
@@ -147,6 +184,9 @@ def main():
         for k, label in LABELS.items():
             if m.get(k) is not None:
                 print(f"| {label} | **{m[k]}** |")
+            elif k in _ALWAYS_SHOWN:
+                # 失敗の兆候は「値が取れない」ときほど隠してはいけない（v15.1）
+                print(f"| {label} | **n/a** |")
         if m.get("permissions"):
             p = m["permissions"]
             print(f"| `permissions` | allow **{p['allow']}** / deny **{p['deny']}** / ask **{p['ask']}** |")
@@ -155,6 +195,15 @@ def main():
         for k, v in m.items():
             print(f"  {k}: {v}")
         print("\n**成果物に書く数値は本スクリプトの出力を引くこと。** 手で書かない。")
+
+    # v15.1: pytest が失敗しても exit 0 だったため、表を貼る側が失敗に気づけなかった。
+    # 表は出力したうえで（計測値そのものは有用）、pytest の失敗を終了コードで伝える。
+    rc = m.get("pytest_exit")
+    if rc:
+        failed = m.get("pytest_failed")
+        print("ERROR: `python3 -m pytest scripts/ -q` が exit {} で終了した（failed {}）"
+              .format(rc, "n/a" if failed is None else failed), file=sys.stderr)
+        return 1
     return 0
 
 

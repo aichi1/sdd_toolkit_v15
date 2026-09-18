@@ -51,10 +51,11 @@ def main():
     if archive_count > 0:
         parts.append(f"アーカイブ: {archive_count}件")
     
+    # v15.1: `systemMessage`（利用者に表示される）。v15.0 の `message` は認識されないキーだった
     result = {
-        "message": f"📚 SDD知識ベース: {' | '.join(parts)}"
+        "systemMessage": f"📚 SDD知識ベース: {' | '.join(parts)}"
     }
-    json.dump(result, sys.stdout)
+    json.dump(result, sys.stdout, ensure_ascii=False)
     sys.exit(0)
 
 if __name__ == "__main__":

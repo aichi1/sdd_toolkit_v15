@@ -15,7 +15,14 @@ Phase 15）: `candidates.jsonl` 133,613 行のうち一意な `suggested_id` は
 本テストは `append_candidates()` が既存の `suggested_id` を持つ候補を
 スキップし、新規の `suggested_id` のみを追記することを固定する（負のテスト:
 同じ候補を2回渡しても行数が2倍にならないこと）。
+
+v15.1: (a) 同じバッチ内の重複（`.claude/agents/foo.md` と `.claude/agents/generated/foo.md`
+が同じ `agent-foo-v1` になる）が 2 行追記されていた。(b) `skills/phase-01a/` のような
+数字でないフェーズディレクトリで `int()` が ValueError を出して抽出全体が止まっていた。
+(c) object でない JSON 行で `load_existing_suggested_ids()` が落ちていた。
 """
+import contextlib
+import io
 import json
 import os
 import tempfile
@@ -74,6 +81,19 @@ class TestLoadExistingSuggestedIds(unittest.TestCase):
             ids = ec.load_existing_suggested_ids(path)
             self.assertEqual(ids, {"a"})
 
+    def test_negative_non_object_json_line_is_skipped_not_fatal(self):
+        """**負のテスト（v15.1）**: object でない JSON 行（配列・文字列・数値・null）で落ちない。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "candidates.jsonl")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("[1, 2]\n")
+                f.write('"just a string"\n')
+                f.write("42\n")
+                f.write("null\n")
+                f.write(json.dumps(_candidate("a")) + "\n")
+            ids = ec.load_existing_suggested_ids(path)
+            self.assertEqual(ids, {"a"})
+
 
 class TestAppendCandidatesDedup(unittest.TestCase):
     def test_new_candidates_are_appended(self):
@@ -123,6 +143,54 @@ class TestAppendCandidatesDedup(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             count = ec.append_candidates([], tmp)
             self.assertEqual(count, 0)
+
+    def test_negative_same_id_twice_in_one_batch_is_appended_once(self):
+        """**負のテスト（v15.1）**: 同じバッチ内に同じ `suggested_id` が 2 件あっても 1 行だけ追記する。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            count = ec.append_candidates(
+                [_candidate("agent-foo-v1", "/a/foo.md"), _candidate("agent-foo-v1", "/b/foo.md")], tmp)
+            self.assertEqual(count, 1)
+            rows = _read_lines(os.path.join(tmp, "candidates.jsonl"))
+            self.assertEqual(len(rows), 1)
+            self.assertEqual(rows[0]["source_path"], "/a/foo.md")   # 先に出た方が残る
+
+    def test_negative_agent_in_generated_and_parent_dir_is_appended_once(self):
+        """**負のテスト（v15.1）**: 実際の走査で `.claude/agents/foo.md` と
+        `.claude/agents/generated/foo.md` が同じ `agent-foo-v1` になっても 1 行だけ追記する。
+        """
+        with tempfile.TemporaryDirectory() as proj, tempfile.TemporaryDirectory() as kb:
+            agents = Path(proj) / ".claude" / "agents"
+            (agents / "generated").mkdir(parents=True)
+            (agents / "foo.md").write_text("# foo agent\n", encoding="utf-8")
+            (agents / "generated" / "foo.md").write_text("# foo agent (generated)\n",
+                                                          encoding="utf-8")
+            cands = ec.extract_candidates_from_agents(proj, "p")
+            self.assertEqual([c["suggested_id"] for c in cands], ["agent-foo-v1"] * 2)
+            count = ec.append_candidates(cands, kb)
+            self.assertEqual(count, 1)
+            self.assertEqual(len(_read_lines(os.path.join(kb, "candidates.jsonl"))), 1)
+
+
+class TestExtractSkillsPhaseDirs(unittest.TestCase):
+    """v15.1: 数字でないフェーズディレクトリで抽出全体が止まらないこと。"""
+
+    def _make_skill(self, root, dirname, body="# Phase 1: build the thing\n"):
+        d = Path(root) / "skills" / dirname
+        d.mkdir(parents=True)
+        (d / "SKILL.md").write_text(body, encoding="utf-8")
+
+    def test_negative_non_numeric_phase_dir_is_skipped_not_fatal(self):
+        """**負のテスト（v15.1）**: `skills/phase-01a/SKILL.md` で ValueError を出さず、
+        そのディレクトリだけを飛ばして stderr に理由を残す。数字のフェーズは従来どおり抽出する。
+        """
+        with tempfile.TemporaryDirectory() as proj:
+            self._make_skill(proj, "phase-01")
+            self._make_skill(proj, "phase-01a")
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                cands = ec.extract_candidates_from_skills(proj, "p")
+            self.assertEqual([c["source_phase"] for c in cands], [1])
+            self.assertIn("phase-01a", err.getvalue())
 
 
 if __name__ == "__main__":

@@ -698,3 +698,243 @@ class TestChangeReportSections(unittest.TestCase):
             "## 6. ロールバック手順",
             "~~~\n```\n引用\n```\n~~~\n## 6. ロールバック手順")
         self.assertEqual(self._check(text)[0]["status"], "pass")
+
+
+# ---------------------------------------------------------------------------
+# v15.1 回帰テスト（test_negative_* は修正前のコードで失敗することを確認済み）
+# ---------------------------------------------------------------------------
+import contextlib
+import io
+import subprocess
+from unittest import mock
+
+_SCRIPT = Path(__file__).resolve().parent / "validate-outputs.py"
+
+
+def _make_phase(root, deliverables, files=None, skill=True):
+    """outputs/phase-01/ と（任意で）skills/phase-01/SKILL.md を持つ最小プロジェクトを作る。"""
+    phase_dir = Path(root) / "outputs" / "phase-01"
+    phase_dir.mkdir(parents=True)
+    meta = {"phase": 1}
+    if deliverables is not None:
+        meta["deliverables"] = deliverables
+    (phase_dir / ".metadata.json").write_text(json.dumps(meta), encoding="utf-8")
+    for rel, content in (files or {}).items():
+        p = Path(root) / rel
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_text(content, encoding="utf-8")
+    if skill:
+        s = Path(root) / "skills" / "phase-01"
+        s.mkdir(parents=True)
+        (s / "SKILL.md").write_text("# Phase 1\n\n## Quality Criteria\n- [ ] 出典がある\n",
+                                    encoding="utf-8")
+    return phase_dir
+
+
+class TestListedDeliverables(unittest.TestCase):
+    """v15.1 / Quality Gate 0: `.metadata.json` の deliverables に列挙された成果物の実在と非空。
+
+    旧実装は「隠しファイル以外のファイルが 1 つ以上あるか」しか見ず、
+    0 バイトの report.md だけがあり analysis.md が欠落していても PASS / exit 0 だった。
+    """
+
+    def _issues(self, root):
+        issues, _ = validate_outputs.check_file_existence(Path(root) / "outputs", 1)
+        return issues
+
+    def _fails(self, issues):
+        return [i for i in issues if i["status"] == "fail"]
+
+    def test_negative_empty_and_missing_listed_deliverables_fail(self):
+        """レビュアーの再現ケース: 空の report.md + 欠落した analysis.md → fail。"""
+        with tempfile.TemporaryDirectory() as t:
+            _make_phase(t, ["report.md", "analysis.md"], {"outputs/phase-01/report.md": ""})
+            fails = self._fails(self._issues(t))
+            self.assertEqual([f["check"] for f in fails], ["deliverables_listed"])
+            self.assertIn("report.md（0 バイト）", fails[0]["message"])
+            self.assertIn("analysis.md（存在しない）", fails[0]["message"])
+
+    def test_negative_end_to_end_exit_code_is_nonzero(self):
+        """CLI 全体でも Status: FAIL / exit 1 になること（旧実装は PASS / exit 0）。"""
+        with tempfile.TemporaryDirectory() as t:
+            _make_phase(t, ["report.md", "analysis.md"], {"outputs/phase-01/report.md": ""})
+            p = subprocess.run([sys.executable, str(_SCRIPT), "--phase", "1", "--project-dir", t],
+                               capture_output=True, text=True)
+            self.assertEqual(p.returncode, 1, p.stdout)
+            self.assertIn("Status: FAIL", p.stdout)
+
+    def test_negative_object_form_missing_file_fails(self):
+        """`{"file": ...}` 形式（builder.md の例）も検査対象になる。"""
+        with tempfile.TemporaryDirectory() as t:
+            _make_phase(t, [{"file": "present.md", "type": "document"},
+                            {"file": "gone.md", "type": "document"}],
+                        {"outputs/phase-01/present.md": "# ok\n"})
+            fails = self._fails(self._issues(t))
+            self.assertEqual(len(fails), 1)
+            self.assertIn("gone.md（存在しない）", fails[0]["message"])
+            self.assertNotIn("present.md", fails[0]["message"])
+
+    def test_negative_validation_dir_is_not_a_deliverable(self):
+        """`.validation/` 配下は Validator の検証レポートであり、成果物として数えない。"""
+        with tempfile.TemporaryDirectory() as t:
+            _make_phase(t, [".validation/report.md"],
+                        {"outputs/phase-01/.validation/report.md": "# report\n"})
+            # has_deliverables（トップレベルに成果物が無い）も fail になるが、ここでは列挙チェックを見る
+            fails = [i for i in self._fails(self._issues(t)) if i["check"] == "deliverables_listed"]
+            self.assertEqual(len(fails), 1)
+            self.assertIn(".validation/", fails[0]["message"])
+
+    def test_string_and_object_forms_and_project_root_paths_pass(self):
+        """文字列 / オブジェクト形式、phase 基準 / プロジェクトルート基準の解決がすべて通る。"""
+        with tempfile.TemporaryDirectory() as t:
+            _make_phase(t, ["report.md", {"file": "docs/in-place.md"},
+                            "outputs/phase-01/report.md"],
+                        {"outputs/phase-01/report.md": "# r\n", "docs/in-place.md": "# d\n"})
+            issues = self._issues(t)
+            self.assertEqual(self._fails(issues), [])
+            listed = [i for i in issues if i["check"] == "deliverables_listed"]
+            self.assertEqual(listed[0]["status"], "pass")
+            self.assertIn("3 件", listed[0]["message"])
+
+    def test_unknown_entry_shape_is_warned_not_dropped_silently(self):
+        with tempfile.TemporaryDirectory() as t:
+            _make_phase(t, ["report.md", 42, {"name": "x.md"}],
+                        {"outputs/phase-01/report.md": "# r\n"})
+            issues = self._issues(t)
+            self.assertEqual(self._fails(issues), [])
+            warns = [i for i in issues if i["check"] == "deliverables_listed_format"]
+            self.assertEqual([w["status"] for w in warns], ["warn"])
+
+    def test_absent_or_empty_deliverables_keep_existing_behavior(self):
+        """deliverables が無い / 空リストなら従来どおり（列挙チェックは行わない）。"""
+        for deliverables in (None, []):
+            with self.subTest(deliverables=deliverables), tempfile.TemporaryDirectory() as t:
+                _make_phase(t, deliverables, {"outputs/phase-01/report.md": ""})
+                issues = self._issues(t)
+                self.assertFalse(any(i["check"].startswith("deliverables_listed") for i in issues))
+                has = [i for i in issues if i["check"] == "has_deliverables"][0]
+                self.assertEqual(has["status"], "pass")
+
+
+class TestOverallStatusVariants(unittest.TestCase):
+    """v15.1: Overall Status の書式違いで exit≠0 の行を素通りさせないこと。
+
+    旧実装は `**Overall Status**: PASS` 以外の書式を読めず overall="" となり、
+    exit≠0 の行があっても「整合している」（pass）と報告していた。
+    """
+
+    ROW = "| 1 | `python3 -m pytest -q` | 1 | 3 failed | log |"
+
+    def _issues(self, status_line, row=None):
+        with tempfile.TemporaryDirectory() as t:
+            phase_dir = Path(t)
+            (phase_dir / ".validation").mkdir()
+            (phase_dir / ".validation" / "report.md").write_text(
+                "# Validation Report\n\n" + status_line + "\n\n"
+                "## Executed Verification\n\n"
+                "| # | コマンド | exit code | 要約 | ログ |\n"
+                "|---|---------|-----------|------|------|\n"
+                + (row or self.ROW) + "\n",
+                encoding="utf-8")
+            return validate_outputs.check_executed_verification(phase_dir)
+
+    def _exit_check(self, issues):
+        return [i for i in issues if i["check"] == "executed_verification_exit_code"][0]
+
+    def test_negative_bold_around_whole_status_is_read_as_pass(self):
+        """`**Overall Status: PASS**` + exit=1 の行 → fail（旧実装は pass）。"""
+        c = self._exit_check(self._issues("**Overall Status: PASS**"))
+        self.assertEqual(c["status"], "fail")
+        self.assertIn("第1条", c["message"])
+
+    def test_negative_emoji_before_verdict_is_read_as_pass(self):
+        """`**Overall Status**: ✅ PASS` / `⚠️` 付きなど → fail（旧実装は pass）。"""
+        for line in ("**Overall Status**: ✅ PASS",
+                     "**Overall Status**: **✅ PASS**",
+                     "**Overall Status**：✅ PASS",
+                     "**Overall Status: 🟢 PASS**"):
+            with self.subTest(line=line):
+                self.assertEqual(self._exit_check(self._issues(line))["status"], "fail")
+
+    def test_negative_unreadable_status_with_failing_row_fails(self):
+        """判定語を読めない場合は「整合している」とみなさず fail（旧実装は pass）。"""
+        for line in ("**Overall Status**: PASSED",
+                     "**Overall Status**: Pass",
+                     "Overall: よさそう",
+                     ""):
+            with self.subTest(line=line):
+                c = self._exit_check(self._issues(line))
+                self.assertEqual(c["status"], "fail")
+                self.assertIn("読み取れない", c["message"])
+
+    def test_non_pass_variants_with_failing_row_are_consistent(self):
+        """読める書式で PASS 以外なら従来どおり整合（pass）。"""
+        for line in ("**Overall Status**：❌ NEEDS_REVISION",
+                     "**Overall Status: FAIL**",
+                     "**Overall Status**: ⚠️ **NEEDS_REVISION**"):
+            with self.subTest(line=line):
+                self.assertEqual(self._exit_check(self._issues(line))["status"], "pass")
+
+    def test_unreadable_status_without_failing_rows_is_unchanged(self):
+        """exit≠0 の行が無ければ、判定語を読めなくても fail にしない（挙動不変）。"""
+        issues = self._issues("Overall: よさそう", row="| 1 | `pytest` | 0 | ok | log |")
+        self.assertEqual([i for i in issues if i["status"] == "fail"], [])
+
+
+class TestNonUtf8Files(unittest.TestCase):
+    """v15.1: Shift_JIS などの非 UTF-8 ファイルで UnicodeDecodeError を出して落ちないこと。"""
+
+    SJIS = "# 報告書\n出典: 日本語の資料\n".encode("shift_jis")
+
+    def test_negative_shift_jis_skill_and_outputs_do_not_crash(self):
+        with tempfile.TemporaryDirectory() as t:
+            phase_dir = Path(t) / "outputs" / "phase-01"
+            phase_dir.mkdir(parents=True)
+            (phase_dir / "report.md").write_bytes(self.SJIS)
+            skill = Path(t) / "skills" / "phase-01"
+            skill.mkdir(parents=True)
+            (skill / "SKILL.md").write_bytes(
+                "## Quality Criteria\n- [ ] 出典がある\n".encode("shift_jis"))
+            issues = validate_outputs.check_skill_quality_criteria(
+                phase_dir, Path(t) / "skills", 1)
+            self.assertNotIn("fail", [i["status"] for i in issues])
+
+    def test_negative_shift_jis_output_in_category_check_does_not_crash(self):
+        with tempfile.TemporaryDirectory() as t:
+            (Path(t) / "report.md").write_bytes(self.SJIS)
+            issues = validate_outputs.check_category_required_sections(
+                Path(t), "research_report")
+            self.assertTrue(issues)
+
+    def test_negative_shift_jis_report_still_detects_nonzero_exit(self):
+        """非 UTF-8 のレポートでも落ちず、ASCII 部分の exit code 検査は従来どおり働く。"""
+        with tempfile.TemporaryDirectory() as t:
+            phase_dir = Path(t)
+            (phase_dir / ".validation").mkdir()
+            (phase_dir / ".validation" / "report.md").write_bytes((
+                "**Overall Status**: PASS\n\n## Executed Verification\n\n"
+                "| # | コマンド | exit code | 要約 | ログ |\n"
+                "|---|---------|-----------|------|------|\n"
+                "| 1 | `pytest` | 1 | 失敗あり | log |\n").encode("shift_jis"))
+            issues = validate_outputs.check_executed_verification(phase_dir)
+            self.assertIn("fail", [i["status"] for i in issues])
+
+
+class TestUnknownProjectTypeMessage(unittest.TestCase):
+    """v15.1: 不明な --project-type のとき、新しいタイプの追加方法を 1 行で案内する（exit code は 1 のまま）。"""
+
+    def test_negative_unknown_type_explains_how_to_add_category(self):
+        rules = {"categories": {"generic": {"skip_checks": [], "required_checks": []}}}
+        with tempfile.TemporaryDirectory() as t:
+            argv = ["validate-outputs.py", "--phase", "1", "--project-type", "nosuch",
+                    "--project-dir", t]
+            out = io.StringIO()
+            with mock.patch.object(validate_outputs, "load_validate_rules", return_value=rules), \
+                    mock.patch.object(sys, "argv", argv), contextlib.redirect_stdout(out):
+                with self.assertRaises(SystemExit) as cm:
+                    validate_outputs.main()
+        self.assertEqual(cm.exception.code, 1)
+        text = out.getvalue()
+        self.assertIn("有効なタイプ: generic", text)
+        self.assertIn("validate_rules.yaml", text)
+        self.assertIn("categories:", text)

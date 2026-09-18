@@ -478,6 +478,113 @@ class TestRequirementIds(unittest.TestCase):
             self.assertEqual([x["reference"] for x in f], ["C-01"])
 
 
+class TestNotACommand(unittest.TestCase):
+    """v15.1: 絶対パス・拡張子つきの名前をコマンドと誤認しない（負のテストと陽性対照の組）。"""
+
+    def _refs(self, text):
+        with tempfile.TemporaryDirectory() as t:
+            return [f["reference"] for f in
+                    sc.check_command_references(_project(t, text), scan_dirs=["docs"])]
+
+    def test_absolute_paths_are_not_commands(self):
+        self.assertEqual(self._refs("`/home/user/run.sh` と `/usr/bin/git` を使う\n"), [])
+
+    def test_name_with_extension_is_not_a_command(self):
+        self.assertEqual(self._refs("ファイル `/notes.md` と `/setup.py`\n"), [])
+
+    def test_no_backtracking_to_a_shorter_prefix(self):
+        """`/run-phase/SKILL.md` を `/run` や `/run-phas` として拾わない。"""
+        self.assertEqual(self._refs("`/made-up/SKILL.md` を読む\n"), [])
+
+    def test_positive_control_real_unresolved_command_still_reported(self):
+        self.assertEqual(self._refs("`/made-up` を実行\n"), ["made-up"])
+
+    def test_positive_control_japanese_right_after_is_still_a_command(self):
+        self.assertEqual(self._refs("まず /made-upを実行する\n"), ["made-up"])
+
+    def test_positive_control_sentence_final_period(self):
+        self.assertEqual(self._refs("最後に /made-up.\n"), ["made-up"])
+
+
+class TestExcludesAndResolveRoots(unittest.TestCase):
+    """v15.1: 許可リスト JSON の `excludes` と `resolve_roots`（どちらも reason 必須）。"""
+
+    def _write(self, t, data, files):
+        import json as _json
+        d = Path(t)
+        for rel, body in files.items():
+            f = d / rel
+            f.parent.mkdir(parents=True, exist_ok=True)
+            f.write_text(body, encoding="utf-8")
+        (d / "docs" / "spec-check-allowlist.json").write_text(
+            _json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        return str(d)
+
+    def test_excluded_history_file_is_not_scanned(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = self._write(t, {"excludes": [
+                {"scope": "docs/CHANGELOG.md", "reason": "履歴。過去のファイルへの言及は正しい"}]},
+                {"docs/CHANGELOG.md": "`docs/gone.md` を削除した\n",
+                 "docs/x.md": "`docs/missing.md` を読む\n"})
+            excluded = set()
+            f = sc.check_file_references(root, ["docs"], excluded)
+            self.assertEqual([x["reference"] for x in f], ["docs/missing.md"])
+            self.assertEqual(excluded, {"docs/CHANGELOG.md"})
+
+    def test_negative_exclude_without_reason_is_invalid(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = self._write(t, {"excludes": [{"scope": "docs/CHANGELOG.md", "reason": ""}]},
+                               {"docs/CHANGELOG.md": "`docs/gone.md`\n"})
+            self.assertEqual(len(sc.check_file_references(root, ["docs"])), 1)
+
+    def test_negative_wildcard_exclude_is_invalid(self):
+        """`"*"` で検査全体を黙って止められない。"""
+        with tempfile.TemporaryDirectory() as t:
+            root = self._write(t, {"excludes": [{"scope": "*", "reason": "全部"}]},
+                               {"docs/x.md": "`docs/gone.md` と `/made-up`\n"})
+            self.assertEqual(len(sc.check_file_references(root, ["docs"])), 1)
+            self.assertEqual(len(sc.check_command_references(root, ["docs"])), 1)
+
+    def test_exclude_uses_path_boundary(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = self._write(t, {"excludes": [{"scope": "docs/hist", "reason": "履歴"}]},
+                               {"docs/hist/a.md": "`docs/gone.md`\n",
+                                "docs/history.md": "`docs/gone2.md`\n"})
+            self.assertEqual([x["file"] for x in sc.check_file_references(root, ["docs"])],
+                             ["docs/history.md"])
+
+    def test_resolve_root_resolves_product_relative_paths(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = self._write(t, {"resolve_roots": [
+                {"path": "product/app", "reason": "製品リポジトリ相対のパス"}]},
+                {"product/app/src/core.py": "x",
+                 "docs/x.md": "`src/core.py` と `src/nothere.py`\n"})
+            f = sc.check_file_references(root, ["docs"])
+            self.assertEqual([x["reference"] for x in f], ["src/nothere.py"])
+
+    def test_negative_resolve_root_without_reason_is_ignored(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = self._write(t, {"resolve_roots": [{"path": "product/app"}]},
+                               {"product/app/src/core.py": "x", "docs/x.md": "`src/core.py`\n"})
+            self.assertEqual(len(sc.check_file_references(root, ["docs"])), 1)
+
+
+class TestRobustInputs(unittest.TestCase):
+    def test_negative_nonexistent_project_dir_is_exit_2(self):
+        import subprocess, sys
+        p = subprocess.run([sys.executable, str(Path(__file__).parent / "spec_check.py"),
+                            "--project-dir", "/nonexistent/sdd-project"],
+                           capture_output=True, text=True)
+        self.assertEqual(p.returncode, 2)
+
+    def test_allowlist_that_is_a_json_list_does_not_crash(self):
+        with tempfile.TemporaryDirectory() as t:
+            (Path(t) / "docs").mkdir()
+            (Path(t) / "docs" / "spec-check-allowlist.json").write_text("[]", encoding="utf-8")
+            self.assertEqual(sc.load_allowlist(t), [])
+            self.assertEqual(sc.load_excludes(t), [])
+
+
 class TestFindingShape(unittest.TestCase):
     def test_finding_has_location_and_kind(self):
         with tempfile.TemporaryDirectory() as t:

@@ -10,11 +10,18 @@ test_metrics.py: `scripts/metrics.py` の計数が正しいことを固定する
   特に危険なのは「正規表現が空振りしても 0 を返して静かに通る」ことである。
   そのため各計数について **0 でない期待値** を持つフィクスチャで検証する。
 """
+import contextlib
+import io
 import json
+import os
+import shutil
+import subprocess
+import sys
 import unittest
 import tempfile
 import importlib.util
 from pathlib import Path
+from unittest import mock
 
 _SPEC = importlib.util.spec_from_file_location(
     "metrics", str(Path(__file__).resolve().parent / "metrics.py"))
@@ -138,6 +145,88 @@ class TestRealProject(unittest.TestCase):
             self.assertGreater(mt.max_issue_id(r), 0, "requirements.md があるのに課題 ID が 0（空振り）")
         if (root / "docs" / "constitution.md").is_file():
             self.assertGreater(mt.count_articles(r), 0, "constitution.md があるのに条数が 0（空振り）")
+
+
+class TestOutsideGitRepo(unittest.TestCase):
+    """v15.1: git リポジトリの外でも落ちず、`git ls-files` の件数を None で返すこと。
+
+    旧実装は `git ls-files ... | wc -l` の出力（`0` + git の stderr）を int() して ValueError で落ちた。
+    """
+
+    def test_negative_collect_outside_git_repo_does_not_crash(self):
+        cwd = os.getcwd()
+        with tempfile.TemporaryDirectory() as t:
+            # 上位ディレクトリがたまたま git 管理下でも、確実に「git 管理外」にする
+            env = {"GIT_DIR": str(Path(t) / "no-such-git-dir"), "GIT_CEILING_DIRECTORIES": t}
+            try:
+                with mock.patch.dict(os.environ, env):
+                    m = mt.collect(t)
+            finally:
+                os.chdir(cwd)          # collect() は chdir する
+        self.assertIsNone(m["tracked_files_docs_skills_claude"])
+
+    @unittest.skipUnless(shutil.which("git"), "git が無い")
+    def test_count_tracked_files_in_git_repo(self):
+        with tempfile.TemporaryDirectory() as t:
+            (Path(t) / "docs").mkdir()
+            (Path(t) / "docs" / "a.md").write_text("x", encoding="utf-8")
+            (Path(t) / "other.md").write_text("x", encoding="utf-8")
+            env = {"GIT_CEILING_DIRECTORIES": str(Path(t).parent)}
+            with mock.patch.dict(os.environ, env):
+                subprocess.run(["git", "init", "-q"], cwd=t, check=True)
+                subprocess.run(["git", "add", "."], cwd=t, check=True)
+                self.assertEqual(mt.count_tracked_files(t), 1)   # docs/a.md のみ
+
+
+class TestPytestFailureVisible(unittest.TestCase):
+    """v15.1: `--markdown` が pytest の失敗を隠さないこと。
+
+    旧実装の表は passed 件数だけで exit 0 だった。failed 件数と exit code の行を足し、
+    pytest が非 0 ならスクリプトも非 0 で終わる（**意図的な契約変更**）。
+    既存の行とラベルは変えない（README / docs が引用している）。
+    """
+
+    BASE = {"pytest_passed": 10, "spec_check_findings": 0, "permissions": None}
+
+    def _main(self, metrics, *flags):
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(mt, "collect", return_value=dict(metrics)), \
+                mock.patch.object(sys, "argv", ["metrics.py", *flags]), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            rc = mt.main()
+        return rc, out.getvalue(), err.getvalue()
+
+    def test_negative_markdown_reports_failures_and_exits_nonzero(self):
+        rc, out, err = self._main(dict(self.BASE, pytest_failed=3, pytest_exit=1), "--markdown")
+        self.assertNotEqual(rc, 0)
+        self.assertIn("| `python3 -m pytest scripts/ -q` の failed 件数 | **3** |", out)
+        self.assertIn("| `python3 -m pytest scripts/ -q` の exit code | **1** |", out)
+        self.assertIn("exit 1", err)
+
+    def test_negative_uncountable_failures_are_shown_as_na(self):
+        """収集エラーなどで failed を数えられなくても行を省略しない。"""
+        rc, out, _ = self._main(dict(self.BASE, pytest_failed=None, pytest_exit=2), "--markdown")
+        self.assertNotEqual(rc, 0)
+        self.assertIn("| `python3 -m pytest scripts/ -q` の failed 件数 | **n/a** |", out)
+
+    def test_green_run_keeps_existing_rows_and_exit_zero(self):
+        rc, out, err = self._main(dict(self.BASE, pytest_failed=0, pytest_exit=0), "--markdown")
+        self.assertEqual(rc, 0)
+        self.assertIn("| `python3 -m pytest scripts/ -q` | **10** |", out)   # 既存の行はそのまま
+        self.assertIn("| `python3 scripts/spec_check.py` の検出件数 | **0** |", out)
+        self.assertEqual(err, "")
+
+    def test_json_mode_also_exits_nonzero_on_pytest_failure(self):
+        rc, out, _ = self._main(dict(self.BASE, pytest_failed=1, pytest_exit=1), "--json")
+        self.assertNotEqual(rc, 0)
+        self.assertEqual(json.loads(out)["pytest_failed"], 1)
+
+    def test_pytest_failed_count(self):
+        self.assertEqual(mt.pytest_failed_count(
+            "FAILED a.py::t - 9 failed?\n3 failed, 10 passed in 1.0s\n", 1), 3)
+        self.assertEqual(mt.pytest_failed_count("10 passed in 1.0s\n", 0), 0)
+        # 失敗したのに 0 を返して静かに通らない
+        self.assertIsNone(mt.pytest_failed_count("ERROR: file or directory not found\n", 4))
 
 
 if __name__ == "__main__":

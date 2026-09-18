@@ -5,8 +5,17 @@
     "ref": "コマンド名（先頭の / は不要）またはファイルパス",
     "scope": "'*' または対象パス（パス境界で照合）",
     "reason": "必須。なぜ許可するのか。空なら無効",
-    "section": "人間向けの分類（パーサは使わない）"
+    "section": "人間向けの分類（パーサは使わない）",
+    "excludes": "v15.1。走査しないファイル/ディレクトリ: [{scope, reason}]。reason 必須、'*' は無効。対象外にしたファイル数は毎回出力に表示される",
+    "resolve_roots": "v15.1。ファイル参照の追加の解決先（プロジェクトルート相対）: [{path, reason}]。製品を別リポジトリ（例: product/app/）に置き、仕様がその中のパスを製品ルート相対で書く場合に使う"
   },
+  "excludes": [
+    {
+      "scope": "docs/CHANGELOG.md",
+      "reason": "版ごとの変更履歴。ツールキット開発プロジェクト（v12→v15）の docs/・outputs/ への言及は当時の事実の記録であり、このリポジトリに実物が無いのが正しい"
+    }
+  ],
+  "resolve_roots": [],
   "entries": [
     {
       "ref": "recap",
@@ -61,6 +70,18 @@
       "scope": "*",
       "reason": ".claude/skills/add-feature/SKILL.md` の略記",
       "section": "略記（実在するファイルへの短い書き方）"
+    },
+    {
+      "ref": "docs/requirements.md",
+      "scope": "docs/rules-reference/requirement-id-convention.md",
+      "reason": "規約の対象そのもの。利用者のプロジェクトで /init-task が生成する",
+      "section": "生成物への参照（/init-task・/run-phase が利用者のプロジェクトに作るファイル。ツールキット単体には無いのが正しい）"
+    },
+    {
+      "ref": "outputs/.phase-context.json",
+      "scope": "docs/rules-reference/session-guidelines-detail.md",
+      "reason": "/run-phase が各フェーズの完了時に生成する引き継ぎファイル",
+      "section": "生成物への参照（/init-task・/run-phase が利用者のプロジェクトに作るファイル。ツールキット単体には無いのが正しい）"
     }
   ]
 }

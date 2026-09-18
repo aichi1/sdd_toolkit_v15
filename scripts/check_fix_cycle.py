@@ -33,14 +33,30 @@ from pathlib import Path
 
 _GATE_RE = re.compile(r"\*\*Gate\*\*:\s*(0|1|2|3-only)")
 _CRITICAL_HEADING_RE = re.compile(r"critical issues", re.IGNORECASE)
-_SECTION_RE = re.compile(r"^##[ \t]+.*$", re.MULTILINE)
-_ISSUE_SPLIT_RE = re.compile(r"^###[ \t]+", re.MULTILINE)
+# `###` 以下の見出しは、本文が「Critical Issues」で**始まる**ときだけ Critical セクションとみなす
+# （番号の接頭辞は許す）。`### Suggestion #1: Critical Issues の書式…` のような
+# 個別指摘の見出しを Critical セクションと誤認しないため。`##` は従来どおり部分一致（挙動不変）。
+_CRITICAL_SUBHEADING_RE = re.compile(r"^(?:\d+(?:\.\d+)*[.)]?[ \t]*)?critical issues",
+                                     re.IGNORECASE)
+_HEADING_RE = re.compile(r"^(#{2,6})[ \t]+(.*)$", re.MULTILINE)
 _FENCE_LINE_RE = re.compile(r"^(`{3,}|~{3,})")
 _INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
 # Critical Issue らしき記述（`### ` 見出しが無くても検出する）。
 # `Gate` 自体は含めない —— Gate 欄の有無を判定する対象と、Issue の存在を判定する
 # マーカーを兼ねると、Gate 欄しか書いていない壊れた入力を誤って「Issue あり」と扱いかねない。
-_ISSUE_MARKER_RE = re.compile(r"\*\*(Location|Problem)\*\*", re.IGNORECASE)
+# 太字（`**Location**`）に加えて、箇条書きの素の `- Location:` も拾う。v15.0 の
+# run-phase SKILL.md の報告雛形がこの書式で、太字だけを見ていたため雛形どおりの報告が
+# 「Critical Issue 0 件」として素通りしていた（v15.1 で修正）。
+_ISSUE_MARKER_RE = re.compile(
+    r"\*\*(?:Location|Problem)\*\*"
+    r"|^[ \t]*(?:[-*+][ \t]+|\d+[.)][ \t]+)?(?:Location|Problem)[ \t]*[:：]",
+    re.IGNORECASE | re.MULTILINE)
+
+# 修正サイクルを開いた根拠（`revision_history[].opened_by`）の閉じた集合（v15.1）。
+# **「Critical 0 なのに修正サイクルがある」こと自体は違反にしない**——専門家の指摘や
+# オーナー決定で開く正当なサイクルがあり（sdd-harness の実測で 2 巡目以降 15 ラウンド中 14）、
+# それを fail にすると Critical をでっち上げる圧力になる。違反は「根拠が書かれていないこと」。
+OPENED_BY_VALUES = ("validator_critical", "expert_defect", "owner_decision", "main_session")
 
 # Gate 自己申告が複数出現し一意に定まらない場合の内部マーカー（missing とは区別する）。
 _AMBIGUOUS_GATE = "__ambiguous__"
@@ -114,51 +130,89 @@ def check_cutoff_rule(metadata):
                     f"最後の要素（cycle={last.get('cycle', '?')}）に owner_decision が無い**")]
 
 
+# ---------------------------------------------------------------- opened_by (v15.1)
+def check_cycle_trigger(metadata):
+    """修正サイクルを開いた根拠: `revision_history` の各要素に `opened_by` があり、
+    値が閉じた集合 `OPENED_BY_VALUES` のいずれかであること。
+
+    **Validator の Critical 件数とは突き合わせない**（上の `OPENED_BY_VALUES` の注記を参照）。
+    """
+    if metadata is None:
+        return [_result("fix_cycle_opened_by", "skip", ".metadata.json が読めないため判定不能")]
+    history = metadata.get("revision_history") or []
+    if not isinstance(history, list) or not history:
+        return [_result("fix_cycle_opened_by", "pass",
+                        "revision_history 0 件（修正サイクルなし）")]
+    bad = []
+    for i, entry in enumerate(history, 1):
+        value = entry.get("opened_by") if isinstance(entry, dict) else None
+        if value not in OPENED_BY_VALUES:
+            bad.append(f"#{i}: {value!r}")
+    if bad:
+        return [_result("fix_cycle_opened_by", "fail",
+                        f"**修正サイクルを開いた根拠 opened_by が無い、または閉じた集合 "
+                        f"{list(OPENED_BY_VALUES)} の外**: {bad}")]
+    return [_result("fix_cycle_opened_by", "pass",
+                    f"revision_history {len(history)} 件すべてに opened_by がある")]
+
+
 # ---------------------------------------------------------------- R-31
-def _sections(text):
-    """`## ` 見出しごとに (heading, body) のリストへ分割する。"""
-    marks = [(m.start(), m.group().strip()) for m in _SECTION_RE.finditer(text)]
-    if not marks:
-        return []
-    marks.append((len(text), ""))
+def _critical_sections(text):
+    """Critical Issues セクションを (heading, body, level) のリストで返す。
+
+    `##` の見出しは部分一致（従来どおり）、`###` 以下は本文の先頭一致で判定する。
+    本文は、同じか浅いレベルの次の見出しの直前まで。
+    """
+    heads = [(m.start(), len(m.group(1)), m.group(0).strip(), m.group(2).strip())
+             for m in _HEADING_RE.finditer(text)]
     out = []
-    for i in range(len(marks) - 1):
-        start, heading = marks[i]
-        end = marks[i + 1][0]
-        out.append((heading, text[start:end]))
+    for i, (start, level, heading, title) in enumerate(heads):
+        if level == 2:
+            if not _CRITICAL_HEADING_RE.search(title):
+                continue
+        elif not _CRITICAL_SUBHEADING_RE.match(title):
+            continue
+        end = len(text)
+        for nstart, nlevel, _, _ in heads[i + 1:]:
+            if nlevel <= level:
+                end = nstart
+                break
+        out.append((heading, text[start:end], level))
     return out
 
 
-def _issue_blocks(section_body):
-    """`### ` 見出し単位のブロックに分割する（無ければ空リスト）。"""
-    parts = _ISSUE_SPLIT_RE.split(section_body)
-    return parts[1:]  # parts[0] は `## ` 見出し行そのもの
+def _issue_split_re(level):
+    """セクションの 1 段深い見出し（`## ` の下なら `### `）で Issue を区切る。"""
+    return re.compile(r"^#{%d}[ \t]+" % (level + 1), re.MULTILINE)
+
+
+def _issue_blocks(section_body, level=2):
+    """1 段深い見出し単位のブロックに分割する（無ければ空リスト）。"""
+    parts = _issue_split_re(level).split(section_body)
+    return parts[1:]  # parts[0] はセクション見出し行そのもの
 
 
 def critical_issue_blocks(report_text):
-    """`## ... Critical Issues ...` セクション配下の `### ` ブロック一覧を返す。"""
+    """Critical Issues セクション配下の Issue ブロック一覧を返す。"""
     blocks = []
-    for heading, body in _sections(report_text):
-        if _CRITICAL_HEADING_RE.search(heading):
-            blocks.extend(_issue_blocks(body))
+    for _heading, body, level in _critical_sections(report_text):
+        blocks.extend(_issue_blocks(body, level))
     return blocks
 
 
 def malformed_critical_sections(report_text):
-    """`### ` 見出しが無いのに Issue らしき記述がある `Critical Issues` セクションの
+    """Issue 見出しが無いのに Issue らしき記述がある `Critical Issues` セクションの
     見出し一覧を返す（Critical #3 の再現手順。`docs/io-spec.md` §2.6 の区切り書式規約）。
 
-    番号付きリスト等、規約外の書式で書かれた Critical Issue は `### ` で分割できず、
+    番号付きリスト等、規約外の書式で書かれた Critical Issue は見出しで分割できず、
     `critical_issue_blocks()` からは「0 件（Critical Issue なし）」に見える。
     それを黙って pass にせず、**区切り書式違反として明示的に fail** できるよう
     見出しを返す。
     """
     offenders = []
-    for heading, body in _sections(report_text):
-        if not _CRITICAL_HEADING_RE.search(heading):
-            continue
-        if _ISSUE_SPLIT_RE.search(body):
-            continue  # 通常どおり `### ` 見出しで区切られている
+    for heading, body, level in _critical_sections(report_text):
+        if _issue_split_re(level).search(body):
+            continue  # 通常どおり 1 段深い見出しで区切られている
         if _ISSUE_MARKER_RE.search(body):
             offenders.append(heading)
     return offenders
@@ -224,10 +278,11 @@ def check_gate_attribution(report_text):
     out = []
     malformed = malformed_critical_sections(report_text)
     if malformed:
-        message = ("**区切り書式が規約に反するため判定不能**（`### ` 見出しが無いのに "
+        message = ("**区切り書式が規約に反するため判定不能**（Issue ごとの見出し"
+                   "（`## Critical Issues` の下なら `### Issue #N`）が無いのに "
                    f"Issue らしき記述がある見出し: {malformed}）。"
-                   "`docs/io-spec.md` §2.6 は Critical Issue を `### ` 見出しで区切ることを"
-                   "規約化している")
+                   "Critical Issue は 1 段深い見出しで 1 件ずつ区切る（`.claude/skills/run-phase/SKILL.md` "
+                   "Step 2.2 の雛形。プロジェクトでは `docs/io-spec.md` §2.6）")
         out.append(_result("gate_field_present", "fail", message))
         out.append(_result("gate_3only_not_critical", "fail",
                            "区切り書式が規約に反するため 3-only 判定も不能（上記と同一原因）"))
@@ -272,12 +327,22 @@ def check_gate_attribution(report_text):
 def run_checks(root, phase):
     results = []
     pd = _phase_dir(root, phase)
-    md = _load_json(pd / ".metadata.json")
-    try:
-        results.extend(check_cutoff_rule(md))
-    except Exception as e:                                   # noqa: BLE001
-        results.append(_result("fix_cycle_cutoff", "fail",
-                               f"検査中に例外: {type(e).__name__}: {e}"))
+    md_path = pd / ".metadata.json"
+    md = _load_json(md_path)
+    if md_path.is_file() and not isinstance(md, dict):
+        # 存在するのに読めない（壊れた JSON・オブジェクトでない）→ skip にして OK を返さない（v15.1）。
+        # v15.0 は末尾カンマ 1 つで 4 巡・owner_decision 無しの違反が「skip / Status: OK」になった。
+        msg = ".metadata.json が存在するが JSON オブジェクトとして読めないため判定不能（**OK にはしない**）"
+        results.append(_result("fix_cycle_cutoff", "fail", msg))
+        results.append(_result("fix_cycle_opened_by", "fail", msg))
+    else:
+        for name, check in (("fix_cycle_cutoff", check_cutoff_rule),
+                            ("fix_cycle_opened_by", check_cycle_trigger)):
+            try:
+                results.extend(check(md))
+            except Exception as e:                           # noqa: BLE001
+                results.append(_result(name, "fail",
+                                       f"検査中に例外: {type(e).__name__}: {e}"))
 
     report_path = pd / ".validation" / "report.md"
     if not report_path.is_file():
@@ -303,7 +368,17 @@ def main():
     args = ap.parse_args()
 
     root = os.path.abspath(args.project_dir)
-    results = run_checks(root, args.phase)
+    # 検査対象が無いのに「OK」を返さない（v15.1）: 不正な番号・存在しないフェーズは実行エラー
+    try:
+        phase = int(args.phase)
+    except ValueError:
+        print(f"ERROR: --phase は整数で指定する（受け取った値: {args.phase!r}）", file=sys.stderr)
+        return 2
+    if not _phase_dir(root, phase).is_dir():
+        print(f"ERROR: {_phase_dir(root, phase)} が存在しない（--project-dir と --phase を確認する）",
+              file=sys.stderr)
+        return 2
+    results = run_checks(root, phase)
 
     if args.json:
         print(json.dumps(results, ensure_ascii=False, indent=2))

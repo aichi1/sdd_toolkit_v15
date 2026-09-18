@@ -22,6 +22,14 @@ C-45 のもう一方の実測症状（修正サイクル 1 巡目。Validator Cr
   `git-zone-backup` を除外ディレクトリに追加して解消する（本フェーズは既に
   +54 テストを追加しており、これ以上攻撃面を広げない）。
 
+v15.1（改名後の名前の衝突）:
+  `phase-01/a.md` と `phase-02/a.md` を `phase-01-a.md` / `phase-02-a.md` に改名したとき、
+  `phase-03/` が**本物の** `phase-01-a.md` を持っていると、最終名が重なって片方が黙って
+  上書きされていた。最終名が重なった場合は、元の名前のまま置かれる側のファイルにも同じ規則
+  （`phase-NN-<元のファイル名>`。NN はそのファイル自身のフェーズ）を適用し、重なりが無くなるまで
+  繰り返す。`phase-NN-` 接頭辞は互いに接頭辞にならない（数字の直後が `-`）ので、改名済み同士は
+  重ならず、この繰り返しは必ず終わる。解消した重なりは `name_collisions` として報告する。
+
 Usage:
   python3 scripts/aggregate_outputs.py --project-dir . [--dry-run] [--json]
 """
@@ -84,14 +92,23 @@ def find_conflicts(outputs_dir: Path) -> dict:
     return {rel: phases for rel, phases in by_rel.items() if len(phases) > 1}
 
 
+def _prefixed_rel(rel: Path, phase_num: int) -> Path:
+    """`rel` のファイル名に `phase-NN-` 接頭辞を付けた相対パスを返す。"""
+    new_name = f"phase-{phase_num:02d}-{rel.name}"
+    return (rel.parent / new_name) if str(rel.parent) != "." else Path(new_name)
+
+
 def aggregate_outputs(project_dir, dry_run: bool = False) -> dict:
     """`outputs/phase-NN/` を `outputs/final/` に集約する（C-45 / R-33）。
 
     衝突するファイルは `phase-NN-<元のファイル名>` に改名して両方残す。
     衝突しないファイルは元の相対パスのまま置く。`dry_run=True` の場合はファイルを書かない。
+    v15.1: 改名後の名前が別のファイルの元の名前と重なる場合は、そのファイルも改名する
+    （モジュール docstring 参照）。どのソースファイルも上書きで失われない。
 
     Returns:
-        {"copied": [...], "renamed": [[rel, phase_num, new_rel], ...], "conflicts": {...}}
+        {"copied": [...], "renamed": [[rel, phase_num, new_rel], ...], "conflicts": {...},
+         "name_collisions": {"最終名": [[phase_num, rel], ...]}}
     """
     project_dir = Path(project_dir)
     outputs_dir = project_dir / "outputs"
@@ -102,15 +119,44 @@ def aggregate_outputs(project_dir, dry_run: bool = False) -> dict:
     files = _iter_phase_files(outputs_dir)
     conflicts = find_conflicts(outputs_dir)
 
+    # 1 巡目: 従来どおりの最終名（衝突する相対パスだけ接頭辞付き）
+    dests, prefixed = [], []
+    for phase_num, _phase_dir, rel, _src in files:
+        if str(rel) in conflicts:
+            dests.append(_prefixed_rel(rel, phase_num))
+            prefixed.append(True)
+        else:
+            dests.append(rel)
+            prefixed.append(False)
+
+    # v15.1: 最終名の重なりを、元の名前のまま置かれる側にも接頭辞を付けて解消する。
+    # 重なりが無ければ 1 回で抜けるので、重ならない場合の挙動は従来と同じ。
+    name_collisions: dict[str, list] = {}
+    while True:
+        by_dest: dict[Path, list[int]] = {}
+        for i, d in enumerate(dests):
+            by_dest.setdefault(d, []).append(i)
+        clashes = {d: idxs for d, idxs in by_dest.items() if len(idxs) > 1}
+        if not clashes:
+            break
+        progressed = False
+        for d, idxs in clashes.items():
+            name_collisions[str(d)] = [[files[i][0], str(files[i][2])] for i in idxs]
+            for i in idxs:
+                if not prefixed[i]:
+                    dests[i] = _prefixed_rel(files[i][2], files[i][0])
+                    prefixed[i] = True
+                    progressed = True
+        if not progressed:
+            # 理論上到達しない（改名済み同士は重ならない）。到達したら上書きせず止める
+            raise RuntimeError(f"unresolvable output name collision: {sorted(map(str, clashes))}")
+
     copied, renamed = [], []
-    for phase_num, _phase_dir, rel, src in files:
+    for (phase_num, _phase_dir, rel, src), dest_rel, was_prefixed in zip(files, dests, prefixed):
         rel_str = str(rel)
-        if rel_str in conflicts:
-            new_name = f"phase-{phase_num:02d}-{rel.name}"
-            dest_rel = (rel.parent / new_name) if str(rel.parent) != "." else Path(new_name)
+        if was_prefixed:
             renamed.append([rel_str, phase_num, str(dest_rel)])
         else:
-            dest_rel = rel
             copied.append(rel_str)
 
         if not dry_run:
@@ -118,7 +164,8 @@ def aggregate_outputs(project_dir, dry_run: bool = False) -> dict:
             dest.parent.mkdir(parents=True, exist_ok=True)
             shutil.copy2(src, dest)
 
-    return {"copied": copied, "renamed": renamed, "conflicts": conflicts}
+    return {"copied": copied, "renamed": renamed, "conflicts": conflicts,
+            "name_collisions": name_collisions}
 
 
 def main():
@@ -138,6 +185,10 @@ def main():
         print(f"conflicting relative paths: {len(result['conflicts'])}")
         for rel, phases in sorted(result["conflicts"].items()):
             print(f"  - {rel}: phases {phases}")
+        # v15.1: 改名後の名前が別ファイルと重なり、追加で改名したもの
+        print(f"final-name collisions resolved: {len(result['name_collisions'])}")
+        for name, sources in sorted(result["name_collisions"].items()):
+            print(f"  - {name}: {sources}")
 
     return 0
 
