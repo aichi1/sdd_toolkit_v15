@@ -16,6 +16,7 @@ import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+from knowledge_curator import curator_candidate_key  # v15.1: curator 候補のキーは 1 箇所に置く
 from registry_utils import (
     check_duplicate,
     extract_quality_criteria,
@@ -175,22 +176,46 @@ def load_candidates(kb_dir: str) -> list[dict]:
     return candidates
 
 
+def is_component_candidate(c) -> bool:
+    """昇格対象のコンポーネント候補（`extract_components.py` 由来の形式）か判定する。
+
+    v15.1: `deduplicate_candidates()` と `compact_candidates_file()` が同じ判定を使う
+    （片方だけ変わると、昇格にも保存にも使われない行が生まれて黙って消える）。
+    """
+    return (
+        isinstance(c, dict)
+        and bool(c.get("suggested_id", ""))
+        and c.get("component_type") in ("skill", "agent", "hook", "rule")
+    )
+
+
 def deduplicate_candidates(candidates: list[dict]) -> dict[str, dict]:
     """suggested_id でグループ化し、最新の候補を返す。"""
     by_id: dict[str, dict] = {}
     for c in candidates:
-        sid = c.get("suggested_id", "")
-        if not sid:
-            continue
-        # component_type が不明なものはスキップ
-        if c.get("component_type") not in ("skill", "agent", "hook", "rule"):
+        # suggested_id が無いもの・component_type が不明なもの・object でない行はスキップ
+        # （object でない行で `.get` が落ちないように。v15.1）
+        if not is_component_candidate(c):
             continue
         # 同一 ID は最新（後に出現したもの）が勝つ
-        by_id[sid] = c
+        by_id[c["suggested_id"]] = c
     return by_id
 
 
-def compact_candidates_file(kb_dir: str, unique: dict[str, dict]) -> None:
+def _preserved_line_key(d) -> str:
+    """コンポーネント候補でない行の重複排除キー（v15.1）。
+
+    curator 候補（`knowledge_curator.py`）は同じキー関数を使う（timestamp だけ違う
+    再実行分を 1 行にまとめる）。それ以外の object は内容の完全一致だけを重複とみなす
+    （未知の形式を推測で同一視して消さない）。
+    """
+    k = curator_candidate_key(d)
+    if k is not None:
+        return "curator:" + k
+    return "json:" + json.dumps(d, ensure_ascii=False, sort_keys=True)
+
+
+def compact_candidates_file(kb_dir: str, unique: dict[str, dict]) -> int:
     """candidates.jsonl を重複排除後の内容だけに書き直す（C-54 / R-34）。
 
     追記専用のままでは 1 回の `/finalize` + `/retrospective` で 79 行増え、
@@ -200,13 +225,49 @@ def compact_candidates_file(kb_dir: str, unique: dict[str, dict]) -> None:
 
     昇格済みかどうかに関わらず、`unique` に含まれる候補は次回以降のメトリクス更新
     （`used_in_projects` の再計算等）でも使われうるため、**捨てずに 1 行だけ残す**。
+
+    v15.1: 以前は `unique`（コンポーネント候補）**だけ**を書き戻していたため、
+    `suggested_id` を持たない `knowledge_curator.py` の改善候補（`/retrospective` の出力）が
+    次の `/finalize` で全件消えていた。コンポーネント候補でない行は**元の行のまま・元の順序で**
+    残す（自身のキーで重複排除する）。JSON として読めない行も黙って捨てず、そのまま残す。
+
+    Returns:
+        書き出した行数。
     """
     path = os.path.join(kb_dir, "candidates.jsonl")
+    preserved: list[str] = []
+    seen_keys: set[str] = set()
+    unparseable = 0
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as f:
+            for raw in f:
+                raw = raw.rstrip("\n")
+                if not raw.strip():
+                    continue
+                try:
+                    d = json.loads(raw)
+                except json.JSONDecodeError:
+                    unparseable += 1
+                    preserved.append(raw)   # 黙って捨てない（v15.1）
+                    continue
+                if is_component_candidate(d):
+                    continue   # `unique` 側で 1 行だけ書き戻す
+                key = _preserved_line_key(d)
+                if key in seen_keys:
+                    continue
+                seen_keys.add(key)
+                preserved.append(raw)
+    if unparseable:
+        print(f"  Warning: kept {unparseable} unparseable line(s) in candidates.jsonl as-is")
+
     tmp_path = path + ".tmp"
     with open(tmp_path, "w", encoding="utf-8") as f:
+        for raw in preserved:
+            f.write(raw + "\n")
         for suggested_id, candidate in sorted(unique.items()):
             f.write(json.dumps(candidate, ensure_ascii=False) + "\n")
     os.replace(tmp_path, path)
+    return len(preserved) + len(unique)
 
 
 def promote(kb_dir: str, dry_run: bool = False) -> dict:
@@ -335,7 +396,7 @@ def promote(kb_dir: str, dry_run: bool = False) -> dict:
 
     if not dry_run:
         save_json(registry, registry_path)
-        compact_candidates_file(kb_dir, unique)   # C-54: 肥大化対策。dry_run では書き換えない
+        compacted_lines = compact_candidates_file(kb_dir, unique)   # C-54: 肥大化対策。dry_run では書き換えない
 
     # サマリー出力
     print(f"\n{'[DRY RUN] ' if dry_run else ''}Promotion Summary:")
@@ -348,7 +409,9 @@ def promote(kb_dir: str, dry_run: bool = False) -> dict:
     print(f"  Skipped (validation errors): {stats['skipped_invalid']}")
     print(f"  Registry total: {registry['stats']['total_components']} components")
     if not dry_run:
-        print(f"  candidates.jsonl compacted to {len(unique)} lines (dedup by suggested_id, C-54)")
+        print(f"  candidates.jsonl compacted to {compacted_lines} lines "
+              f"({len(unique)} component candidates deduped by suggested_id, C-54; "
+              f"other lines kept, v15.1)")
 
     return stats
 

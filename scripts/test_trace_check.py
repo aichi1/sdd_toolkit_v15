@@ -255,6 +255,66 @@ class TestCrosscutting(unittest.TestCase):
             self.assertEqual(_kinds(f, "crosscutting"), ["R-27"])
 
 
+# ============================================================ v15.1: 利用者プロジェクトで空振り・クラッシュしない
+class TestUserProjectRobustness(unittest.TestCase):
+    """v15.0 の `/init-task` は §5 の見出しも `phases` の形も規定しておらず、実プロジェクトで
+    (a) `## 4. 機能要件` と書かれて「要件 0 件・欠陥 0 件・OK」になり、
+    (b) `phases` が配列で作られて AttributeError で落ちた。"""
+
+    def test_negative_requirements_without_section_5_is_a_defect(self):
+        with tempfile.TemporaryDirectory() as t:
+            d = Path(t) / "docs"
+            d.mkdir(parents=True)
+            (d / "requirements.md").write_text(
+                "## 4. 機能要件\n\n| ID | 要件 |\n|---|---|\n| R-01 | やること |\n",
+                encoding="utf-8")
+            findings = tc.check_traceability(t)
+            self.assertEqual(_kinds(findings, "missing_section"), ["docs/requirements.md"])
+            self.assertIn("missing_section", tc.DEFECT_KINDS)
+
+    def test_no_requirements_file_is_not_a_defect(self):
+        """`/init-task` 前のツールキット単体（requirements.md が無い）は従来どおり 0 件で OK。"""
+        with tempfile.TemporaryDirectory() as t:
+            self.assertEqual(tc.check_traceability(t), [])
+
+    def test_phases_as_list_does_not_crash(self):
+        with tempfile.TemporaryDirectory() as t:
+            root = _project(t, "| R-01 | やること | — | 01 | S-01 |\n",
+                            skills={"01": "> 対応要件: R-01"})
+            (Path(t) / "metadata.json").write_text(json.dumps(
+                {"phases": [{"phase": 1, "status": "completed"},
+                            {"phase": 2, "status": "in_progress"}]}), encoding="utf-8")
+            self.assertEqual(tc.completed_phases(root), {1})
+            self.assertEqual(_kinds(tc.check_traceability(root), "not_delivered"), ["R-01"])
+
+    def test_negative_row_without_phase_column_is_reported(self):
+        """列の足りない要件行を黙って捨てない。"""
+        with tempfile.TemporaryDirectory() as t:
+            root = _project(t, "| R-01 | やること | — | 01 | S-01 |\n"
+                               "| R-02 | 実現フェーズを書き忘れ | C-02 |\n")
+            self.assertEqual(sorted(tc.extract_requirements(root)), ["R-01", "R-02"])
+            self.assertEqual(_kinds(tc.check_traceability(root), "convention_violation"), ["R-02"])
+
+    def test_negative_nonexistent_project_dir_is_exit_2(self):
+        import subprocess, sys
+        p = subprocess.run([sys.executable, str(Path(__file__).parent / "trace_check.py"),
+                            "--project-dir", "/nonexistent/sdd-project"],
+                           capture_output=True, text=True)
+        self.assertEqual(p.returncode, 2)
+
+    def test_output_metadata_not_an_object_does_not_crash(self):
+        with tempfile.TemporaryDirectory() as t:
+            od = Path(t) / "outputs" / "phase-01"
+            od.mkdir(parents=True)
+            (od / ".metadata.json").write_text("[]", encoding="utf-8")
+            self.assertEqual(tc.extract_output_claims(t), {"01": set()})
+
+    def test_metadata_not_an_object_does_not_crash(self):
+        with tempfile.TemporaryDirectory() as t:
+            (Path(t) / "metadata.json").write_text("[1, 2]", encoding="utf-8")
+            self.assertEqual(tc.completed_phases(t), set())
+
+
 # ============================================================ 出力の形
 class TestReportShape(unittest.TestCase):
     def test_finding_has_required_keys(self):

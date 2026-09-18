@@ -203,13 +203,9 @@ Phase削除時:
       "word_count": 1500
     }
   ],
-  "revision_history": [
-    {
-      "iteration": 1,
-      "timestamp": "2026-02-05T10:30:00Z",
-      "changes": "初回生成"
-    }
-  ]
+  "revision_history": []
+  // 修正サイクルごとに 1 要素: {"cycle": 1, "opened_by": "validator_critical", "changes": "...", "rechecked": [...]}
+  // （初回生成は修正サイクルではないので要素を作らない。opened_by は scripts/check_fix_cycle.py が検査する）
 }
 ```
 
@@ -218,9 +214,10 @@ Phase削除時:
 任意: outputs/phase-{NN}/.validation/
 
 内容:
-  - report.md（検証レポート）
-  - quality-gates.json（品質ゲート結果）
-  - iteration-{N}.md（修正サイクル記録）
+  - report-round{R}.md（巡ごとの検証レポート。上書きしない）
+  - report.md（最新の巡と同じ内容。検査スクリプトが読む）
+  - expert-<agent>-round{R}.md（専門家の指摘の原文。/run-phase Step 2.5）
+  - hashes-before.txt / hashes-after.txt（成果物ハッシュの事前/事後）
 ```
 
 ### outputs/final/ — 最終成果物の集約

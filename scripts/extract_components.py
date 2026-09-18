@@ -67,6 +67,13 @@ def extract_candidates_from_skills(project_root: str, project_name: str) -> list
             continue
 
         phase_num = os.path.basename(phase_dir).replace("phase-", "")
+        # v15.1: `phase-01a` のような数字でないディレクトリで `int()` が ValueError を出し、
+        # hook 経由の抽出全体が止まっていた。そのフェーズだけ飛ばして理由を stderr に残す
+        # （`isdigit()` は `²` 等も真にするので ASCII の数字に限定する）
+        if not re.fullmatch(r"[0-9]+", phase_num):
+            print(f"  Warning: skipping {skill_path} (non-numeric phase directory)",
+                  file=sys.stderr)
+            continue
         tags = extract_tags_from_content(content)
         skill_name = extract_skill_name_from_content(content, phase_num)
 
@@ -172,7 +179,7 @@ def extract_candidates_from_rules(project_root: str, project_name: str) -> list[
 def load_existing_suggested_ids(candidates_path: str) -> set:
     """`candidates.jsonl` に既に存在する `suggested_id` の集合を読み込む。
 
-    壊れた行（JSON decode 失敗）は無視する（黙って全体を止めない。R-10 と同じ思想）。
+    壊れた行（JSON decode 失敗）と object でない行は無視する（黙って全体を止めない。R-10 と同じ思想）。
     ファイルが存在しない場合は空集合を返す。
     """
     ids = set()
@@ -187,8 +194,11 @@ def load_existing_suggested_ids(candidates_path: str) -> set:
                 d = json.loads(line)
             except json.JSONDecodeError:
                 continue
+            # v15.1: `[1, 2]` のような object でない行で `.get` が AttributeError を出していた
+            if not isinstance(d, dict):
+                continue
             sid = d.get("suggested_id")
-            if sid:
+            if sid and isinstance(sid, str):
                 ids.add(sid)
     return ids
 
@@ -205,12 +215,23 @@ def append_candidates(candidates: list[dict], kb_dir: str) -> int:
     スキップする（`scripts/promote_candidates.py` の重複排除キーと同じ
     `suggested_id` を使う。C-54 の圧縮〔`compact_candidates_file()`〕は
     `promote()` 実行時のみ効くため、本変更は追記の**発生源**を直す）。
+
+    v15.1: 既存行との比較だけでは**同じバッチ内**の重複を防げなかった
+    （`.claude/agents/foo.md` と `.claude/agents/generated/foo.md` がどちらも
+    `agent-foo-v1` になり 2 行追記された）。採用した ID も既知集合に加え、先に出た方だけ残す。
     """
     candidates_path = os.path.join(kb_dir, "candidates.jsonl")
     os.makedirs(kb_dir, exist_ok=True)
 
     existing_ids = load_existing_suggested_ids(candidates_path)
-    new_candidates = [c for c in candidates if c.get("suggested_id") not in existing_ids]
+    new_candidates = []
+    for c in candidates:
+        sid = c.get("suggested_id")
+        if sid in existing_ids:
+            continue
+        if sid:
+            existing_ids.add(sid)   # v15.1: バッチ内の重複も 1 件にする
+        new_candidates.append(c)
 
     if not new_candidates:
         return 0

@@ -4,6 +4,9 @@ test_aggregate_outputs.py: aggregate_outputs.py の回帰テスト（C-45 / R-33
 
 C-45: `/finalize` の後勝ち方式は、全フェーズが同名の証跡を持つドッグフーディング型
 プロジェクトで旧フェーズの証跡を黙って失う。**負のテストで「同名ファイルが失われないこと」を固定する。**
+
+v15.1: 改名後の名前（`phase-01-a.md`）が別フェーズの**本物の** `phase-01-a.md` と重なると、
+片方が黙って上書きされていた。**負のテストで「どのソースファイルも失われないこと」を固定する。**
 """
 import tempfile
 import unittest
@@ -175,6 +178,74 @@ class TestNestedSubdirectories(unittest.TestCase):
             final = proj.root / "outputs" / "final"
             self.assertTrue((final / "dryrun" / "phase-01-notes.md").is_file())
             self.assertTrue((final / "dryrun" / "phase-02-notes.md").is_file())
+
+
+
+def _final_contents(final: Path) -> list[str]:
+    """`outputs/final/` 配下の全ファイルの内容（ソート済み）。"""
+    return sorted(p.read_text(encoding="utf-8") for p in final.rglob("*") if p.is_file())
+
+
+class TestRenamedNameCollision(unittest.TestCase):
+    """v15.1: 改名後の最終名が別ファイルの元の名前と重なっても、どのファイルも失われないこと。"""
+
+    def _make(self, root, files):
+        for rel, text in files.items():
+            path = Path(root) / "outputs" / rel
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text, encoding="utf-8")
+
+    def test_negative_renamed_name_does_not_overwrite_real_file(self):
+        """**負のテスト（v15.1）**: phase-01/a.md と phase-02/a.md の改名先 `phase-01-a.md` が、
+        phase-03 の本物の `phase-01-a.md` を上書きしない（旧実装では phase-01/a.md が消えた）。
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            self._make(tmp, {
+                "phase-01/a.md": "p1 a",
+                "phase-02/a.md": "p2 a",
+                "phase-03/phase-01-a.md": "p3 real phase-01-a",
+            })
+            result = ao.aggregate_outputs(tmp)
+            final = Path(tmp) / "outputs" / "final"
+            self.assertEqual(_final_contents(final),
+                             sorted(["p1 a", "p2 a", "p3 real phase-01-a"]),
+                             "集約でソースファイルが失われている")
+            # 改名規則（phase-NN-<元の名前>、NN は自身のフェーズ）を重なった側にも適用する
+            self.assertEqual((final / "phase-01-a.md").read_text(encoding="utf-8"), "p1 a")
+            self.assertEqual((final / "phase-03-phase-01-a.md").read_text(encoding="utf-8"),
+                             "p3 real phase-01-a")
+            self.assertEqual(result["name_collisions"],
+                             {"phase-01-a.md": [[1, "a.md"], [3, "phase-01-a.md"]]})
+            self.assertIn(["phase-01-a.md", 3, "phase-03-phase-01-a.md"], result["renamed"])
+            self.assertNotIn("phase-01-a.md", result["copied"])
+
+    def test_negative_cascading_collision_loses_nothing(self):
+        """**負のテスト（v15.1）**: 追加の改名先がさらに別の本物のファイルと重なっても失われない。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            self._make(tmp, {
+                "phase-01/a.md": "p1 a",
+                "phase-02/a.md": "p2 a",
+                "phase-03/phase-01-a.md": "p3",
+                "phase-04/phase-03-phase-01-a.md": "p4",
+                "phase-04/sub/b.md": "p4 b",
+            })
+            ao.aggregate_outputs(tmp)
+            final = Path(tmp) / "outputs" / "final"
+            self.assertEqual(_final_contents(final), sorted(["p1 a", "p2 a", "p3", "p4", "p4 b"]))
+            # 重なりに関係しないファイルは従来どおり元の相対パスのまま
+            self.assertEqual((final / "sub" / "b.md").read_text(encoding="utf-8"), "p4 b")
+
+    def test_no_collision_reports_empty_and_dry_run_matches(self):
+        """重なりが無いときは name_collisions が空。dry-run と実行で改名結果が一致する。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            proj = _Project(tmp)
+            self.assertEqual(ao.aggregate_outputs(str(proj.root), dry_run=True)["name_collisions"], {})
+            self._make(tmp, {"phase-03/phase-01-patch.diff": "p3 real"})
+            dry = ao.aggregate_outputs(str(proj.root), dry_run=True)
+            wet = ao.aggregate_outputs(str(proj.root))
+            self.assertEqual(dry["renamed"], wet["renamed"])
+            self.assertEqual(dry["name_collisions"], wet["name_collisions"])
+            self.assertIn("phase-01-patch.diff", wet["name_collisions"])
 
 
 if __name__ == "__main__":

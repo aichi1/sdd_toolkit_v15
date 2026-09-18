@@ -97,10 +97,83 @@ def get_valid_phases(metadata):
     return list(range(1, phase_count + 1))
 
 
+def _deliverable_paths(deliverables):
+    """`.metadata.json` の deliverables を (パス文字列のリスト, 解釈できない要素のリスト) に分ける。
+
+    v15.1: 要素は文字列（`"report.md"`。planner.md の例）と
+    `{"file": "report.md", ...}`（builder.md / builder-validator-detail.md の例）の両形式が
+    実在するため、両方を受け付ける。それ以外は黙って捨てず warn として報告する。
+    """
+    paths, bad = [], []
+    for d in deliverables:
+        if isinstance(d, str) and d.strip():
+            paths.append(d.strip())
+        elif isinstance(d, dict) and isinstance(d.get("file"), str) and d["file"].strip():
+            paths.append(d["file"].strip())
+        else:
+            bad.append(d)
+    return paths, bad
+
+
+def check_listed_deliverables(phase_dir, project_root, deliverables):
+    """`.metadata.json` の deliverables に列挙された成果物が存在し、空でないか（v15.1）。
+
+    Quality Gate 0（免除不可）:「列挙した成果物が存在し、空でない」。
+    旧実装は「隠しファイル以外のファイルが 1 つ以上あるか」しか見ておらず、
+    **0 バイトの report.md だけがあり analysis.md が欠落していても PASS / exit 0** だった
+    （プリチェック PASS はファストパスで Validator を省略する入口なので、Gate 0 の穴がそのまま素通りする）。
+
+    パスはまず `outputs/phase-NN/` 基準、無ければプロジェクトルート基準で解決する
+    （`docs/x.md` のように in-place の成果物を列挙するプロジェクトがあるため）。
+    `.validation/` 配下は Validator の検証レポートであり成果物として数えない。
+    """
+    issues = []
+    paths, bad = _deliverable_paths(deliverables)
+    if bad:
+        issues.append({
+            "check": "deliverables_listed_format",
+            "status": "warn",
+            "message": ("deliverables の要素を解釈できない（文字列か {{\"file\": ...}} のみ対応）: {}"
+                        .format(", ".join(repr(b)[:60] for b in bad)))
+        })
+
+    validation_dir = (phase_dir / ".validation").resolve()
+    problems = []
+    for p in paths:
+        target = next((c for c in (phase_dir / p, project_root / p) if c.exists()), None)
+        if target is None:
+            problems.append("{}（存在しない）".format(p))
+            continue
+        resolved = target.resolve()
+        if resolved == validation_dir or validation_dir in resolved.parents:
+            problems.append("{}（.validation/ 配下は成果物として数えない）".format(p))
+        elif target.is_dir():
+            if not any(target.iterdir()):
+                problems.append("{}（空のディレクトリ）".format(p))
+        elif target.stat().st_size == 0:
+            problems.append("{}（0 バイト）".format(p))
+
+    if problems:
+        issues.append({
+            "check": "deliverables_listed",
+            "status": "fail",
+            "message": (".metadata.json の deliverables に列挙された成果物が欠落または空: {}"
+                        "（Quality Gate 0: 成果物は存在し、空でないこと）".format(", ".join(problems)))
+        })
+    elif paths:
+        issues.append({
+            "check": "deliverables_listed",
+            "status": "pass",
+            "message": "deliverables に列挙された成果物 {} 件がすべて存在し、空でない".format(len(paths))
+        })
+    return issues
+
+
 def check_file_existence(outputs_dir, phase):
     """成果物ディレクトリとメタデータの存在チェック"""
     issues = []
     phase_dir = outputs_dir / "phase-{:02d}".format(phase)
+    listed = None     # .metadata.json の deliverables（v15.1: 列挙された成果物の実在チェック用）
 
     if not phase_dir.is_dir():
         issues.append({
@@ -138,6 +211,8 @@ def check_file_existence(outputs_dir, phase):
                         "status": "fail",
                         "message": ".metadata.json に必須フィールド '{}' がない".format(field)
                     })
+            if isinstance(meta, dict):
+                listed = meta.get("deliverables")
         except (json.JSONDecodeError, Exception) as e:
             issues.append({
                 "check": "metadata_valid_json",
@@ -161,6 +236,17 @@ def check_file_existence(outputs_dir, phase):
             "message": "成果物ファイル {} 件".format(len(content_files))
         })
 
+    # v15.1: deliverables が列挙されていれば、その 1 件ずつの実在と非空を確かめる。
+    # 未指定・空リストなら上の「1 件以上あるか」だけ（従来どおり）。
+    if isinstance(listed, list) and listed:
+        issues.extend(check_listed_deliverables(phase_dir, outputs_dir.parent, listed))
+    elif listed and not isinstance(listed, list):
+        issues.append({
+            "check": "deliverables_listed_format",
+            "status": "warn",
+            "message": ".metadata.json の deliverables がリストでないため、列挙された成果物の実在を検査できない"
+        })
+
     return issues, phase_dir
 
 
@@ -177,7 +263,9 @@ def check_skill_quality_criteria(phase_dir, skills_dir, phase):
         })
         return issues
 
-    skill_text = skill_path.read_text(encoding="utf-8")
+    # v15.1: errors="replace"。Shift_JIS などの非 UTF-8 ファイルで UnicodeDecodeError を出して
+    # プリチェック全体が落ちていた（check_change_report_sections は既に replace だった）
+    skill_text = skill_path.read_text(encoding="utf-8", errors="replace")
 
     # Quality Criteria セクションを抽出
     criteria_match = re.search(
@@ -209,11 +297,11 @@ def check_skill_quality_criteria(phase_dir, skills_dir, phase):
         "message": "Quality Criteria: {} 項目".format(len(criteria_items))
     })
 
-    # 成果物テキストを結合して簡易チェック
+    # 成果物テキストを結合して簡易チェック（v15.1: 非 UTF-8 でも落ちないよう errors="replace"）
     all_output_text = ""
     for f in phase_dir.iterdir():
         if f.is_file() and f.suffix == ".md" and not f.name.startswith("."):
-            all_output_text += f.read_text(encoding="utf-8") + "\n"
+            all_output_text += f.read_text(encoding="utf-8", errors="replace") + "\n"
 
     # 必須セクションキーワードの簡易存在チェック
     section_keywords = {
@@ -256,6 +344,22 @@ _INTENTIONAL_RE = re.compile(r"^(意図的|expected|期待値)$")
 _EV_HEADING = r"^#{2,3}[ \t]*(?:\d+[.)]?[ \t]*)*Executed Verification"
 
 
+# `Overall Status` 行の書式（v15.1）。**閉じた集合**として列挙し、散文から推測しない:
+#   **Overall Status**: PASS         既定の書式（validator.md のテンプレート）
+#   **Overall Status**: **PASS**     判定語だけ太字
+#   **Overall Status: PASS**         太字が全体を囲む
+#   **Overall Status**: ✅ PASS      判定語の前に絵文字 1 つ（下の集合のみ）
+#   **Overall Status**：PASS         全角コロン
+# 判定語も PASS / NEEDS_REVISION / FAIL の 3 つに限る。
+# 旧実装は `\*\*Overall Status\*\*` 固定 + 任意の大文字列だったため、上の 2〜4 行目の書式では
+# overall="" となり、**exit≠0 の行があるのに「整合している」と判定して PASS を素通りさせていた**。
+_STATUS_EMOJI = "\u2705\u274c\u26a0\u2714\u2716\U0001F7E2\U0001F7E1\U0001F534"  # ✅❌⚠✔✖🟢🟡🔴
+_OVERALL_STATUS_RE = re.compile(
+    r"\*\*Overall Status\**\s*[:：]\s*\**\s*"
+    r"(?:[" + _STATUS_EMOJI + r"]\ufe0f?\s*)?\**\s*"
+    r"(PASS|NEEDS_REVISION|FAIL)(?![A-Za-z0-9_])")
+
+
 def _split_markdown_row(line):
     r"""Markdown 表の 1 行をセルに分割する。
 
@@ -288,7 +392,8 @@ def check_executed_verification(phase_dir):
     if not report.is_file():
         return []          # report 自体が無い場合は既存チェックに委ねる（挙動不変）
 
-    text = report.read_text(encoding="utf-8")
+    # v15.1: errors="replace"。非 UTF-8 のレポートで UnicodeDecodeError を出して落ちないようにする
+    text = report.read_text(encoding="utf-8", errors="replace")
     if not re.search(_EV_HEADING, text, re.MULTILINE):
         return [{"check": "executed_verification", "status": "warn",
                  "message": ".validation/report.md に '## Executed Verification' セクションがない"}]
@@ -342,7 +447,7 @@ def check_executed_verification(phase_dir):
         else:
             failing.append((num, cmd, code))
 
-    status_m = re.search(r"\*\*Overall Status\*\*\s*[:：]\s*\**\s*([A-Z_]+)", text)
+    status_m = _OVERALL_STATUS_RE.search(text)
     overall = status_m.group(1) if status_m else ""
 
     if failing:
@@ -354,12 +459,21 @@ def check_executed_verification(phase_dir):
                 "message": ("Overall Status が PASS だが exit code が 0 でない行が {} 件ある（{}）。"
                             "constitution.md 第1条: exit≠0 のコマンドが1つでもあれば PASS にできない"
                             .format(len(failing), detail))})
+        elif not overall:
+            # v15.1: 判定語を読めないまま「整合している」とはみなさない（黙って通さない。C-42 と同じ型）
+            issues.append({
+                "check": "executed_verification_exit_code",
+                "status": "fail",
+                "message": ("exit code が 0 でない行が {} 件ある（{}）が、Overall Status を読み取れない。"
+                            "`**Overall Status**: PASS / NEEDS_REVISION / FAIL` の書式で書くこと。"
+                            "判定を読めないまま整合しているとはみなさない（constitution.md 第1条）"
+                            .format(len(failing), detail))})
         else:
             issues.append({
                 "check": "executed_verification_exit_code",
                 "status": "pass",
                 "message": ("exit≠0 の行が {} 件あり、Overall Status は {} （PASS ではない）。整合している"
-                            .format(len(failing), overall or "(未検出)"))})
+                            .format(len(failing), overall))})
     else:
         issues.append({"check": "executed_verification_exit_code", "status": "pass",
                        "message": "exit code が 0 でない行はない"})
@@ -416,11 +530,11 @@ def check_category_required_sections(phase_dir, category, skip_patterns=None):
     if category not in required_sections:
         return issues
 
-    # Collect all output text
+    # Collect all output text（v15.1: 非 UTF-8 でも落ちないよう errors="replace"）
     all_output_text = ""
     for f in phase_dir.iterdir():
         if f.is_file() and f.suffix == ".md" and not f.name.startswith("."):
-            all_output_text += f.read_text(encoding="utf-8") + "\n"
+            all_output_text += f.read_text(encoding="utf-8", errors="replace") + "\n"
     all_lower = all_output_text.lower()
 
     for section_name, keywords in required_sections[category]:
@@ -565,6 +679,9 @@ def main():
                 if rules_data and "categories" in rules_data:
                     valid_types = list(rules_data["categories"].keys())
                     print("  有効なタイプ: {}".format(", ".join(valid_types)))
+                # v15.1: 有効なタイプを並べるだけでは、新しいタイプの足し方が分からなかった
+                print("  → 新しいタイプは validate_rules.yaml の `categories:` の下に追加できる"
+                      "（書式はファイル冒頭のコメントを参照）")
                 sys.exit(1)
             skip_patterns = type_rules["skip_checks"]
             print("[INFO] Project type: {}".format(project_type))

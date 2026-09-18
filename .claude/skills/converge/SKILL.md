@@ -8,14 +8,20 @@
 
 ## Input Requirements
 
-- `outputs/phase-NN/trace-report.md`（無ければ先に `python3 scripts/trace_check.py --markdown` を実行して得る）
+- `python3 scripts/trace_check.py --markdown` の出力（`/analyze` は標準出力だけでファイルを作らない。
+  フェーズの記録として `outputs/phase-NN/trace-report.md` に保存していればそれを使う）
 - `docs/convergence.md` §0（記録形式。**このセクションは本スキルが変更しない**）
-- `docs/requirements.md` §5（要件と実現フェーズ）
+- `docs/requirements.md` の `## 5. 機能要件（R-ID）`（要件と実現フェーズ。`docs/rules-reference/requirement-id-convention.md`）
 
 ## Output Specification
 
-`docs/convergence.md` の **`## 2. エントリ` セクション末尾への追記のみ**。新規ファイルは作らない。
+`docs/convergence.md` の **`## 2. エントリ` セクション末尾への追記のみ**。
 既存セクション（§0 記録形式、既存の `### Entry:` 見出し）は変更しない。
+
+**`docs/convergence.md` が存在しない場合に限り**、Step 0 で `templates/convergence.md` を
+**そのまま**コピーして作る（v15.0 の `/init-task` はこのファイルを作っておらず、`/converge` が
+一度も実行できない状態だった）。既にあるが §0 の形式と違う（独自形式で作られた）場合は、
+**書き換えも作り直しもせず**、差異をオーナーに報告して止まる（追記専用の原則を守るため）。
 
 ## Quality Criteria
 
@@ -26,6 +32,16 @@
 - [ ] エントリの末尾に、本スキルを起動した経緯（フェーズ番号・日付）を明記した
 
 ## Procedure
+
+### Step 0: 記録先を確認する
+
+```bash
+test -f docs/convergence.md || cp templates/convergence.md docs/convergence.md
+grep -n '^## 0\. 記録形式\|^## 2\. エントリ' docs/convergence.md
+```
+
+`grep` が 2 行（§0 と §2 の見出し）を返さなければ、§0 の形式ではない既存ファイルである。
+**書き換えずに**オーナーへ報告して止まる。
 
 ### Step 1: 入力を確認する
 
@@ -63,6 +79,13 @@ git diff --numstat -- docs/convergence.md
 ```
 
 **2 列目（削除行）が 0 であること。** 0 でなければ Step 4 で既存行を壊している。差分を破棄して Step 4 からやり直す。
+
+`docs/convergence.md` が未追跡（Step 0 で作ったばかり）だと `git diff` は何も出さず、何も証明しない。
+その場合は代わりに次を実行し、`<` で始まる行（テンプレートから消えた行）が 0 件であることを確かめる:
+
+```bash
+diff templates/convergence.md docs/convergence.md | grep -c '^<'
+```
 
 ### Step 6: 報告する
 

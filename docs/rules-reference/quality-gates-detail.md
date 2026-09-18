@@ -156,9 +156,10 @@ Critical Criteria未達 → FAIL
 
 **合格基準:**
 ```
-重大な矛盾なし → PASS
-軽微な矛盾（用語の揺れ等） → NEEDS_REVISION
-重大な矛盾（数値が違う等） → FAIL
+Gate 3 は recommended（免除可）。Gate 3 だけを根拠にした指摘は Suggestion であり、判定を下げない（C-50）
+矛盾が docs/ の必須要件（Gate 1）や SKILL.md の品質基準（Gate 2）に抵触する場合だけ Critical
+  例: 成果物の表と本文で数値が違い、docs/ が「正確な数値」を要件にしている → Gate 1 の Critical
+  例: 用語の揺れ → Gate 3-only の Suggestion
 ```
 
 **不合格時の対処:**

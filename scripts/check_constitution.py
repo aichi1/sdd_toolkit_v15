@@ -13,9 +13,13 @@ check_constitution.py: docs/constitution.md の強制点のうち、機械検査
   検査できなかった項目は `skip` として明示的に報告し、`pass` と区別する。
 
 使い方:
-  python3 scripts/check_constitution.py --phase 6
-  python3 scripts/check_constitution.py --phase 6 --article 3
+  python3 scripts/check_constitution.py --phase 6                   # 第2条のみ（汎用。既定）
+  python3 scripts/check_constitution.py --phase 6 --article 2
+  python3 scripts/check_constitution.py --phase 6 --profile toolkit # SDD Toolkit 自己改善用の全条
   python3 scripts/check_constitution.py --phase 6 --json
+
+  v15.0 は `--article` 省略時に第2/3/4/10/11 条をすべて実行していた。第3/4/10/11 条は
+  ツールキット自己改善プロジェクトの条文に固定されているため、v15.1 から既定は第2条のみ。
 
 exit code:
   0 = 違反なし   1 = 違反あり   2 = 実行エラー（引数不正など）
@@ -177,6 +181,26 @@ def unapproved_amendments(root):
         if not _APPROVED.search(cells[3]):
             bad.append(cells[0])
     return bad
+def amendment_results(root, article):
+    """改正手続きの完了: 「改正履歴の追認状況」表に未承認の行が無いこと。
+
+    条番号に依存しない汎用の検査。ツールキット自己改善用の第3条の中と、v15.1 からは
+    汎用プロファイル（`article=0` = 条番号なしの「改正手続き」）の両方で使う。
+    """
+    out = []
+    bad = unapproved_amendments(root)
+    if bad is None:
+        out.append(_result(article, "amendments_all_approved", "skip",
+                           "docs/constitution.md の「改正履歴の追認状況」表が見つからない"))
+    else:
+        out.append(_result(article, "amendments_all_approved", "pass" if not bad else "fail",
+                           f"改正 {0 if not bad else len(bad)} 件が未承認"
+                           if bad else "改正履歴の追認状況にすべて承認の記録がある"))
+        if bad:
+            out[-1]["detail"] = bad
+    return out
+
+
 # ---------------------------------------------------------------- 第2条
 def check_article_2(root, phase):
     out = []
@@ -311,16 +335,7 @@ def check_article_3(root, phase):
                                else f"**Validator が再実行していない: {missing}**"))
 
     # --- 改正手続きの完了: 追認状況表に未承認の行が無いこと（オーナー決定 2026-09-05）---
-    bad = unapproved_amendments(root)
-    if bad is None:
-        out.append(_result(3, "amendments_all_approved", "skip",
-                           "docs/constitution.md の「改正履歴の追認状況」表が見つからない"))
-    else:
-        out.append(_result(3, "amendments_all_approved", "pass" if not bad else "fail",
-                           f"改正 {0 if not bad else len(bad)} 件が未承認"
-                           if bad else "改正履歴の追認状況にすべて承認の記録がある"))
-        if bad:
-            out[-1]["detail"] = bad
+    out.extend(amendment_results(root, 3))
 
     # --- D-04: settings.json が valid JSON ---
     sj = Path(root) / ".claude" / "settings.json"
@@ -480,25 +495,60 @@ def run_checks(root, phase, articles=None):
     return results
 
 
+# `--article` を省略したときに実行する条（v15.1）。
+# 第2条（patch.diff の逆適用）だけが汎用で、第3/4/10/11 条は SDD Toolkit 自身の自己改善
+# プロジェクトの条文・ファイル配置（eval/・.claude/hooks/・D-01・.phase-context.json の自己変更記録）
+# に固定されている。利用者のプロジェクトでは条番号の意味が違うので、既定では実行しない。
+PROFILES = {"generic": {2}, "toolkit": set(CHECKS)}
+
+
 def main():
     ap = argparse.ArgumentParser(description="constitution の強制点を機械検査する")
     ap.add_argument("--phase", required=True, help="フェーズ番号")
     ap.add_argument("--article", type=int, action="append",
-                    help="検査する条番号（複数可）。省略時はすべて")
+                    help=f"検査する条番号（複数可。{sorted(CHECKS)} のいずれか）。省略時は --profile に従う")
+    ap.add_argument("--profile", choices=sorted(PROFILES), default="generic",
+                    help="--article 省略時の対象。generic = 第2条のみ（既定）/ "
+                         "toolkit = SDD Toolkit 自己改善用の全条（第2/3/4/10/11 条）")
     ap.add_argument("--project-dir", default=".", help="プロジェクトルート")
     ap.add_argument("--json", action="store_true", help="JSON で出力")
     args = ap.parse_args()
 
     root = os.path.abspath(args.project_dir)
-    results = run_checks(root, args.phase, set(args.article) if args.article else None)
+    try:
+        int(args.phase)
+    except ValueError:
+        print(f"ERROR: --phase は整数で指定する（受け取った値: {args.phase!r}）", file=sys.stderr)
+        return 2
+    if args.article:
+        unknown = sorted(set(args.article) - set(CHECKS))
+        if unknown:
+            # 実装の無い条を指定して「0 件実行・OK」を返さない（v15.1）
+            print(f"ERROR: 第{unknown}条の機械検査は実装されていない（実装済み: {sorted(CHECKS)}）。"
+                  "人間が守る条文は docs/constitution.md の「判定対象外」節に書く", file=sys.stderr)
+            return 2
+        articles = set(args.article)
+    else:
+        articles = PROFILES[args.profile]
+    results = run_checks(root, args.phase, articles)
+    if not args.article and args.profile == "generic":
+        # 改正履歴の追認状況は条番号に依存しないので汎用でも検査する（toolkit では第3条の中で行う）
+        try:
+            results = amendment_results(root, 0) + results
+        except Exception as e:                       # noqa: BLE001
+            results.insert(0, _result(0, "check_error", "fail", f"検査中に例外: {type(e).__name__}: {e}"))
 
     if args.json:
         print(json.dumps(results, ensure_ascii=False, indent=2))
     else:
         print(f"=== Constitution Check: Phase {args.phase} ===\n")
+        print(f"  対象: 第{sorted(articles)}条"
+              + ("" if args.article else f"（--profile {args.profile}）")
+              + ("＋改正手続き" if not args.article and args.profile == "generic" else "") + "\n")
         mark = {"pass": "✓", "fail": "✗", "skip": "-"}
         for r in results:
-            print(f"  {mark.get(r['status'], '?')} [第{r['article']}条 {r['check']}] {r['message']}")
+            label = "改正手続き" if r["article"] == 0 else f"第{r['article']}条"
+            print(f"  {mark.get(r['status'], '?')} [{label} {r['check']}] {r['message']}")
         n = {s: sum(1 for r in results if r["status"] == s) for s in ("pass", "fail", "skip")}
         print(f"\nResult: {n['pass']} pass, {n['fail']} fail, {n['skip']} skip")
         print("Status: " + ("VIOLATION" if n["fail"] else "OK"))

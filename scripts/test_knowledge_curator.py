@@ -13,7 +13,13 @@ C-46: retrospective JSON のキー名取り違えにより、教訓 → コン�
      → dict 全体が文字列化されて候補に入る
 
 本テストは**両形式**（現行 lessons_learned / 旧 lessons）で候補が生成されることを守る。
+
+v15.1 / C-57: `append_curator_candidates()` が無条件に追記していたため、同じ retrospective を
+2 回処理すると candidates.jsonl に同じ候補が重複して溜まった。重複しないことも固定する。
 """
+import json
+import os
+import tempfile
 import unittest
 import importlib.util
 from pathlib import Path
@@ -284,6 +290,74 @@ class TestApplicabilityFiltering(unittest.TestCase):
         c = kc.generate_improvement_candidates(retro, self._five_skills_same_category())
         # broad の教訓のみが5件マッチし、narrow はタグの重なりが無く0件 → 合計5件
         self.assertEqual(len(c), kc.MAX_CANDIDATES_PER_LESSON)
+
+
+def _read_rows(path):
+    with open(path, encoding="utf-8") as f:
+        return [json.loads(line) for line in f if line.strip()]
+
+
+class TestAppendCuratorCandidatesDedup(unittest.TestCase):
+    """v15.1 / C-57: curator 候補の追記が重複しないこと。"""
+
+    def test_negative_same_retrospective_twice_does_not_duplicate_lines(self):
+        """**負のテスト（C-57）**: 同じ retrospective を 2 回処理しても行数は増えない。
+
+        2 回目は `timestamp` だけが異なる候補になる（実運用の再実行と同じ）ので、
+        timestamp をキーに含めていないことも同時に確かめる。
+        """
+        with tempfile.TemporaryDirectory() as kb:
+            path = os.path.join(kb, "candidates.jsonl")
+            first = kc.generate_improvement_candidates(CURRENT_FORMAT, _registry())
+            self.assertTrue(first)
+            n1 = kc.append_curator_candidates(first, kb)
+            rows_after_first = len(_read_rows(path))
+
+            second = kc.generate_improvement_candidates(CURRENT_FORMAT, _registry())
+            for c in second:
+                c["timestamp"] = "2099-01-01T00:00:00Z"
+            n2 = kc.append_curator_candidates(second, kb)
+
+            self.assertEqual(n1, len(first))
+            self.assertEqual(n2, 0, "2 回目の処理で重複候補が追記された")
+            self.assertEqual(len(_read_rows(path)), rows_after_first)
+
+    def test_negative_duplicate_within_one_batch_is_appended_once(self):
+        """**負のテスト（C-57）**: 同じバッチ内の同一キー候補は 1 件だけ追記する。"""
+        with tempfile.TemporaryDirectory() as kb:
+            c = kc.generate_improvement_candidates(CURRENT_FORMAT, _registry())[0]
+            dup = dict(c, timestamp="2099-01-01T00:00:00Z")
+            n = kc.append_curator_candidates([c, dup], kb)
+            self.assertEqual(n, 1)
+            self.assertEqual(len(_read_rows(os.path.join(kb, "candidates.jsonl"))), 1)
+
+    def test_negative_nothing_new_does_not_open_or_create_file(self):
+        """**負のテスト（C-57）**: 新規 0 件ならファイルを開かない（空ファイルも作らない）。"""
+        with tempfile.TemporaryDirectory() as kb:
+            n = kc.append_curator_candidates([], kb)
+            self.assertEqual(n, 0)
+            self.assertFalse(os.path.exists(os.path.join(kb, "candidates.jsonl")))
+
+    def test_different_lesson_for_same_component_is_still_appended(self):
+        """重複排除が効きすぎない: 同じコンポーネントでも教訓が違えば別候補として追記する。"""
+        with tempfile.TemporaryDirectory() as kb:
+            kc.append_curator_candidates(
+                kc.generate_improvement_candidates(CURRENT_FORMAT, _registry()), kb)
+            other = kc.generate_improvement_candidates(LEGACY_FORMAT, _registry())
+            self.assertTrue(other)
+            n = kc.append_curator_candidates(other, kb)
+            self.assertEqual(n, len(other))
+
+    def test_existing_non_curator_lines_are_ignored_for_keys(self):
+        """extract_components の候補行・壊れた行・object でない行があっても落ちない。"""
+        with tempfile.TemporaryDirectory() as kb:
+            path = os.path.join(kb, "candidates.jsonl")
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(json.dumps({"suggested_id": "skill-x-v1", "component_type": "skill"}) + "\n")
+                f.write("{not valid json\n")
+                f.write("[1, 2]\n")
+            c = kc.generate_improvement_candidates(CURRENT_FORMAT, _registry())
+            self.assertEqual(kc.append_curator_candidates(c, kb), len(c))
 
 
 if __name__ == "__main__":

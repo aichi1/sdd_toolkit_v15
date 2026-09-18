@@ -33,6 +33,9 @@
   finding as Critical (mandatory) contradicts that exemption. Every Critical Issue must self-report
   which Gate it violates (`Gate: 0 / 1 / 2 / 3-only` — see `builder-validator.md` Validator Rule 3);
   `3-only` cannot appear on a Critical Issue
+- **Form-only findings** (citation position, heading numbers, formatting, terminology, leaked internal IDs)
+  are handled like Gate 3-only: Suggestions, deferred to `findings-register.md`, no fix cycle.
+  **Exception**: if a shipped deliverable states something false, it is a content defect (Gate 1), fix it now
 
 ## Phase-Specific Additions
 | Phase Type | Additional Checks |

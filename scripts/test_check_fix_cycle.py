@@ -306,6 +306,110 @@ class TestMalformedCriticalSections(unittest.TestCase):
         self.assertEqual(cfc.malformed_critical_sections(text), [])
 
 
+class TestSubheadingCriticalSections(unittest.TestCase):
+    """v15.1: `###` レベルの Critical Issues 見出しと、太字でない `- Location:` を読む。
+
+    v15.0 の run-phase SKILL.md Step 2.2 の雛形は `## Detailed Findings` の下に
+    `### Critical Issues (must fix)` と番号付きリスト（太字なし）を置いていた。
+    `##` だけを見て太字の `**Location**` だけを拾う検査は、雛形どおりの報告を
+    「Critical Issue 0 件」として素通りさせていた（**偽 PASS**）。
+    """
+
+    V150_TEMPLATE_REPORT = (
+        "# Validation Report: Phase 1\n\n"
+        "## Detailed Findings\n\n"
+        "### Critical Issues (must fix)\n"
+        "1. 用語の表記が前フェーズと揺れている\n"
+        "   - Location: report.md:12\n"
+        "   - Expected: 前フェーズと同じ表記\n"
+        "   - Actual: 別表記\n"
+        "   - Fix: 表記を揃える\n\n"
+        "### Suggestions (nice to have)\n"
+        "1. なし\n"
+    )
+
+    def test_negative_v150_run_phase_template_is_not_silently_zero(self):
+        r = cfc.check_gate_attribution(self.V150_TEMPLATE_REPORT)
+        self.assertEqual(_statuses(r, "gate_field_present"), ["fail"])
+        self.assertEqual(_statuses(r, "gate_3only_not_critical"), ["fail"])
+
+    def test_level3_section_with_level4_issue_blocks_is_parsed(self):
+        text = (
+            "## Detailed Findings\n\n"
+            "### Critical Issues\n\n"
+            "#### Issue #1: 価格の欠落\n- **Gate**: 1\n- **Location**: a.md:3\n\n"
+            "#### Issue #2: 用語\n- **Gate**: 3-only\n- **Location**: a.md:9\n\n"
+            "### Suggestions\n\n#### Suggestion #1: 図\n- **Gate**: 3-only\n"
+        )
+        self.assertEqual(len(cfc.critical_issue_blocks(text)), 2)
+        r = cfc.check_gate_attribution(text)
+        self.assertEqual(_statuses(r, "gate_field_present"), ["pass"])
+        self.assertEqual(_statuses(r, "gate_3only_not_critical"), ["fail"])
+
+    def test_level3_section_ends_at_next_sibling_heading(self):
+        """Suggestions 側の Issue ブロックを Critical に数えない。"""
+        text = (
+            "### Critical Issues\n\n**なし。**\n\n"
+            "### Suggestions\n\n#### S1\n- **Gate**: 3-only\n- **Location**: a.md\n"
+        )
+        self.assertEqual(cfc.critical_issue_blocks(text), [])
+        self.assertEqual(cfc.malformed_critical_sections(text), [])
+
+    def test_issue_title_mentioning_critical_issues_is_not_a_section(self):
+        """`### Suggestion #1: Critical Issues の書式…` を Critical セクションと誤認しない。"""
+        text = (
+            "## Suggestions\n\n"
+            "### Suggestion #1: Critical Issues の書式を揃える\n- **Location**: a.md\n"
+        )
+        self.assertEqual(cfc.critical_issue_blocks(text), [])
+        self.assertEqual(cfc.malformed_critical_sections(text), [])
+
+    def test_numbered_prefix_on_subheading_is_accepted(self):
+        text = "## 5. 指摘\n\n### 5.1 Critical Issues\n\n1. Location: a.md\n"
+        self.assertEqual(len(cfc.malformed_critical_sections(text)), 1)
+
+
+class TestCycleTrigger(unittest.TestCase):
+    """v15.1: revision_history[].opened_by（修正サイクルを開いた根拠）。"""
+
+    def test_metadata_missing_is_skip(self):
+        self.assertEqual(_statuses(cfc.check_cycle_trigger(None), "fix_cycle_opened_by"),
+                         ["skip"])
+
+    def test_no_cycles_passes(self):
+        r = cfc.check_cycle_trigger({"revision_history": []})
+        self.assertEqual(_statuses(r, "fix_cycle_opened_by"), ["pass"])
+
+    def test_all_entries_with_closed_set_values_pass(self):
+        md = {"revision_history": [{"cycle": 1, "opened_by": "validator_critical"},
+                                   {"cycle": 2, "opened_by": "expert_defect"},
+                                   {"cycle": 3, "opened_by": "owner_decision"},
+                                   {"cycle": 4, "opened_by": "main_session"}]}
+        r = cfc.check_cycle_trigger(md)
+        self.assertEqual(_statuses(r, "fix_cycle_opened_by"), ["pass"])
+
+    def test_negative_missing_opened_by_fails(self):
+        md = {"revision_history": [{"cycle": 1, "opened_by": "validator_critical"},
+                                   {"cycle": 2}]}
+        r = cfc.check_cycle_trigger(md)
+        self.assertEqual(_statuses(r, "fix_cycle_opened_by"), ["fail"])
+        self.assertIn("#2", r[0]["message"])
+
+    def test_negative_value_outside_closed_set_fails(self):
+        md = {"revision_history": [{"cycle": 1, "opened_by": "reviewer"}]}
+        r = cfc.check_cycle_trigger(md)
+        self.assertEqual(_statuses(r, "fix_cycle_opened_by"), ["fail"])
+
+    def test_cycle_opened_with_zero_critical_is_not_a_violation(self):
+        """Validator が Critical 0 で PASS でも、専門家の指摘やオーナー決定で開いた
+        サイクルは正当。件数との突き合わせはしない。"""
+        md = {"validation_status": "pass",
+              "revision_history": [{"cycle": 1, "opened_by": "expert_defect",
+                                    "validator_critical_count": 0}]}
+        r = cfc.check_cycle_trigger(md)
+        self.assertEqual(_statuses(r, "fix_cycle_opened_by"), ["pass"])
+
+
 class TestRunChecksIntegration(unittest.TestCase):
     """run_checks(): ファイルシステム経由の統合テスト。"""
 
@@ -337,6 +441,27 @@ class TestRunChecksIntegration(unittest.TestCase):
             results = cfc.run_checks(tmp, 12)
             self.assertIn("fail", _statuses(results, "fix_cycle_cutoff"))
             self.assertIn("fail", _statuses(results, "gate_field_present"))
+
+    def test_negative_malformed_metadata_is_fail_not_skip(self):
+        """v15.1: 末尾カンマ 1 つで 4 巡・owner_decision 無しの違反が OK にならない。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            d = self._phase_dir(tmp)
+            (d / ".metadata.json").write_text(
+                '{"validation_status": "NEEDS_REVISION", "revision_history": '
+                '[{"cycle": 1}, {"cycle": 2}, {"cycle": 3}, {"cycle": 4}],}', encoding="utf-8")
+            results = cfc.run_checks(tmp, 12)
+            self.assertEqual(_statuses(results, "fix_cycle_cutoff"), ["fail"])
+            self.assertEqual(_statuses(results, "fix_cycle_opened_by"), ["fail"])
+
+    def test_negative_missing_phase_dir_and_bad_phase_are_exit_2(self):
+        import subprocess, sys
+        script = str(Path(__file__).parent / "check_fix_cycle.py")
+        with tempfile.TemporaryDirectory() as tmp:
+            (Path(tmp) / "outputs").mkdir()
+            for phase in ("7", "abc"):
+                p = subprocess.run([sys.executable, script, "--phase", phase,
+                                    "--project-dir", tmp], capture_output=True, text=True)
+                self.assertEqual(p.returncode, 2, (phase, p.stdout, p.stderr))
 
     def test_full_pipeline_positive_case(self):
         with tempfile.TemporaryDirectory() as tmp:

@@ -77,10 +77,25 @@
 **ステップ1.2：docs/ 構造設計**
 タスクカテゴリに基づいて仕様ファイルを作成します。
 全カテゴリ共通で以下を必ず含める：
-- `docs/requirements.md`（目的、スコープ、非目的、制約、成功条件）
+- `docs/requirements.md`（目的、スコープ、非目的、制約、**機能要件（R-ID）**、成功条件。下記ステップ1.2a 参照）
 - `docs/plan.md`（Phase構成、成果物、進め方）
 - `docs/team.md`（チーム編成と役割）
 - `docs/constitution.md`（**必須**。`templates/constitution.md` を土台に生成する。下記ステップ1.2b 参照）
+- `docs/io-spec.md`（**必須**。フェーズ成果物の仕様。下記ステップ1.2c 参照）
+- `docs/convergence.md`（`templates/convergence.md` を**そのままコピー**する。`/converge` の追記先）
+
+**ステップ1.2a：`docs/requirements.md` を要件 ID 規約どおりに書く（全カテゴリ必須）**
+
+`/analyze`（`scripts/trace_check.py`）と `/converge` は、`docs/requirements.md` の
+**`## 5. 機能要件（R-ID）`（完全一致）の見出し配下の表だけ**を読む。見出しが違うと
+`trace_check.py` は `missing_section` を報告して exit 1 になる。規約の全文は
+`docs/rules-reference/requirement-id-convention.md`。
+
+- 節の番号と見出しは次に固定する: `## 1. 目的` / `## 2. スコープ` / `## 3. 非目的` /
+  `## 4. 制約` / `## 5. 機能要件（R-ID）` / `## 6. 成功条件`（以降の節は自由）
+- §5 は 5 列の表 `| ID | 要件 | 対応課題 | 実現フェーズ | 検証 |`。「実現フェーズ」には
+  ステップ1.4 で決めたフェーズ番号（`01`、`02, 03`、横断なら `全`）を書く
+- 各 `skills/phase-NN/SKILL.md` の冒頭に `> 対応要件: R-01, R-02` の 1 行を置く（ステップ1.5）
 
 加えて、カテゴリ固有のファイルを追加：
 
@@ -108,10 +123,29 @@ small_implementation の場合：
 ```text
 docs/
 ├── requirements.md     # 機能要件・非機能要件（共通で作成済み）
-├── tech-stack.md       # 使用言語・フレームワーク・依存関係
+├── tech-stack.md       # 使用言語・フレームワーク・依存関係。§4 に検証コマンド（下記）
 ├── io-spec.md          # 入出力仕様（入力形式、出力形式、エラー時の振る舞い）
 └── constraints.md      # 技術的制約（対応OS、実行環境、外部依存制限）
 ```
+
+`docs/tech-stack.md` の **`## 4. 検証コマンド`** は Validator が PASS の前に**全件実行する**コマンドの
+一覧である（`.claude/agents/validator.md` Step 4.5。ここに書いたコマンドが `## Executed Verification`
+に無ければ Critical）。`### 4.0 全フェーズ共通` と `### 4.N Phase N 固有` に分けて書く。
+Python の場合は `PYTHONDONTWRITEBYTECODE=1` を付ける（検証が作る `.pyc` で成果物ハッシュが
+変わる・古いバイトコードでテストが落ちる事故を防ぐ）。例:
+
+```markdown
+## 4. 検証コマンド
+
+### 4.0 全フェーズ共通
+- `PYTHONDONTWRITEBYTECODE=1 python3 -m pytest tests/ -q -p no:cacheprovider`
+
+### 4.2 Phase 2 固有
+- `python3 -m mypy src/`
+```
+
+`research_report` / `internal_proposal` のように `tech-stack.md` を作らないカテゴリでは、
+検証コマンドは各 `SKILL.md` の Quality Criteria に書く（無ければ Validator は `N/A` と記録する）。
 
 > `templates/team-roster.json` に定義された 3 カテゴリ以外は扱わない。
 > 将来のカテゴリ候補は `docs/rules-reference/file-structure-detail.md`「将来カテゴリ候補」を参照。
@@ -122,16 +156,17 @@ docs/
 
 1. 各条項は「**原則**」「**理由**」「**強制点**（実行できるコマンド）」の3点セットで書く
 2. **強制点を持たない原則は載せない。** 機械検査できないものは「判定対象外（人間が守るもの）」節に分けて明示する
-3. `scripts/check_constitution.py` は SDD Toolkit 自身の自己改善プロジェクト用にハードコードされている
-   （第2/3/4/10/11 条）。**汎用に流用できるのは第2条（patch.diff の逆適用検査）のみ**。
-   他プロジェクトでは第3/4/10/11 条を実行してはならない旨を constitution.md に明記する
+3. `scripts/check_constitution.py` の第3/4/10/11 条は SDD Toolkit 自身の自己改善プロジェクト用にハードコードされている。
+   **汎用に流用できるのは第2条（patch.diff の逆適用検査）と、条番号に依存しない「改正手続き」の検査**で、
+   v15.1 からは `--article` を省略するとこの 2 つだけが走る（`--profile toolkit` を付けない限り第3/4/10/11 条は走らない）
 4. 少なくとも以下の2条は全プロジェクトで置く:
    - **第1条 検証は実行して確かめる** — 強制点は当該プロジェクトのテスト実行コマンド（`{verification_command}`）
-   - **第2条 変更は必ず可逆** — 強制点は `python3 scripts/check_constitution.py --phase {N} --article 2`
+   - **第2条 変更は必ず可逆** — 強制点は `python3 scripts/check_constitution.py --phase {N}`
 5. 残りの条文は `docs/constraints.md` のうち**機械検査に落とせるものだけ**を格上げする
    （grep で検出できる禁止パターン、pytest で確認できる振る舞い等）
 6. 「改正手続き」節と「改正履歴の追認状況」節をテンプレートから引き継ぐ
-   （`check_constitution.py` の `unapproved_amendments` が後者を読む）
+   （`check_constitution.py` の既定の検査「改正手続き」が後者の表を読み、承認欄に「承認済み／追認済み／決定済み」の
+   無い行があれば fail する）
 
 > **なぜ必須か**: `docs/constitution.md` は `.claude/agents/validator.md`・`.claude/skills/run-phase/SKILL.md`・
 > `scripts/validate-outputs.py`・`scripts/check_constitution.py` から参照される。
@@ -148,7 +183,7 @@ docs/
 | §2.2 | `.metadata.json` のスキーマ | Builder / Validator |
 | **§2.3** | `change-report.md` の**必須6セクション** | `scripts/validate-outputs.py`（見出しの番号と文言を正規表現で検査） |
 | §2.4 | `patch.diff`（`git diff --binary` で生成） | `scripts/check_constitution.py` 第2条 |
-| **§2.5.2** | `revision_history` の打ち切り規則と `owner_decision` | `scripts/check_fix_cycle.py`、`.claude/rules/builder-validator.md` |
+| **§2.5.2** | `revision_history` の各要素の `opened_by`（修正サイクルを開いた根拠）と、打ち切り規則の `owner_decision` | `scripts/check_fix_cycle.py`、`.claude/rules/builder-validator.md` |
 | **§2.6** | `Executed Verification` の表形式 | `scripts/validate-outputs.py`（exit code と Overall Status の整合を検査） |
 
 必須6セクション（**番号と文言の両方**が一致しないと fail する）:
@@ -157,8 +192,21 @@ docs/
 
 > 該当しないプロジェクトでも**見出しは省略せず**、内容に「該当なし」と書く。
 
-`Executed Verification` の表は列順 `# | コマンド | exit code | 要約` を固定し、
+`Executed Verification` の表は列順 `# | コマンド | exit code | 要約 | ログ位置` を固定し、
 コマンド中のパイプは `\|` でエスケープする（**列がズレると exit code の検査が黙って素通りする**）。
+§2.6 には検証レポートの Critical Issue の書式も書く: `## Critical Issues` の下に 1 件 1 見出し
+（`### Issue #N`）で区切り、各件に `- **Gate**: 0 / 1 / 2` を自己申告で書く（`3-only` は Suggestions へ）。
+番号付きリストで書くと `scripts/check_fix_cycle.py` が「区切り書式が規約に反する」として fail する。
+
+§2.5.2 には次の規則を書く（`scripts/check_fix_cycle.py` が検査する）:
+
+- `revision_history[]` の各要素は `cycle`（1 始まり）・`opened_by`・`changes` を持つ
+- **`opened_by`** は修正サイクルを開いた根拠で、次の 4 値のいずれか:
+  `validator_critical`（Validator の Critical）／ `expert_defect`（専門家の指摘。
+  `.validation/expert-<agent>-round<R>.md` の ID を添える）／ `owner_decision`（オーナーが直すと決めた）／
+  `main_session`（メインセッションの自己検証）。**Validator が Critical 0 でも、専門家の指摘や
+  オーナー決定で開くサイクルは正当**。違反は根拠が書かれていないことだけ
+- 3 巡以上かつ `validation_status` が `"pass"` でなければ、最後の要素に非空の `owner_decision` を書く
 
 **ステップ1.3：構造化仕様収集（インテーク → 深掘り）**
 `templates/intake/` のカテゴリ別インテークテンプレートを使用し、初回で基本情報を一括収集した上で、回答に応じて必要なだけ深掘り質問を行う。
@@ -228,9 +276,15 @@ docs/
 テンプレートのプレースホルダー `{...}` を、実際のプロジェクト情報に置換してください。
 docs/ の内容に応じて手順の追加・調整は可能ですが、必須セクション構成と Quality Criteria は削除しないでください。
 
+**どのテンプレートでも、冒頭の `> 対応要件: {R-NN, ...}` 行は削除せず、`docs/requirements.md`
+§5 の「実現フェーズ」がこのフェーズを指す R-ID をすべて書く**（`/analyze` が読む唯一の宣言。
+`docs/rules-reference/requirement-id-convention.md` §4）。
+
 対応するテンプレートがない task_type の場合は、以下の汎用テンプレートを使用：
 ```markdown
 # Phase {N}: {Phase Name}
+
+> 対応要件: {R-NN, R-NN}
 
 ## Objective
 {このフェーズが生み出すものの明確な記述}
@@ -262,13 +316,18 @@ docs/ の内容に応じて手順の追加・調整は可能ですが、必須�
 
 `/init-task` の最後に、選んだカテゴリに応じた **必須ファイル一覧** を `docs/_manifest.json` に保存します。
 
-- 例:
+- 例（全カテゴリ共通の 6 ファイル + カテゴリ固有のファイル）:
 ```json
 {
   "category": "internal_proposal",
   "required_files": [
-    "problem.md",
     "requirements.md",
+    "plan.md",
+    "team.md",
+    "constitution.md",
+    "io-spec.md",
+    "convergence.md",
+    "problem.md",
     "constraints.md",
     "stakeholders.md",
     "success-criteria.md"
@@ -287,6 +346,9 @@ docs/ の内容に応じて手順の追加・調整は可能ですが、必須�
 - 既に同名がある場合は上書きせず、差分提案として提示
 
 生成後、`docs/team.md` に「いつ/何のために呼ぶか」も明記する（例：Phase 1でレビュー、Phase 2で監査など）。
+`/run-phase` Step 2.5 はこの表と、各フェーズの**実際の変更**（`git status --porcelain --untracked-files=all`）から呼ぶ専門家を決める。
+**全員を毎回呼ぶことを既定にしない**。フェーズごとに「どのファイル・どの観点に触れたら誰を呼ぶか」を書く
+（例: 認証・権限・外部入力・シェル実行に触れたら security、モジュール境界・スキーマなら architect）。
 
 ### フェーズ2：カスタマイズ（スターターを利用する場合）
 
@@ -352,9 +414,20 @@ docs/ の内容に応じて手順の追加・調整は可能ですが、必須�
   "starter_used": {boolean},
   "starter_version": "{version if applicable}",
   "estimated_hours": {hours},
-  "status": "initialized"
+  "status": "initialized",
+  "current_phase": 1,
+  "phases": {
+    "1": {"status": "not_started", "depends_on": []},
+    "2": {"status": "not_started", "depends_on": [1]}
+  }
 }
 ```
+
+**`phases` は辞書（キーはフェーズ番号の文字列）にする。配列にしない。**
+`/run-phase`（Step 0.3 の `depends_on`、Step 4.1 の完了記録）・`/re-init-task`・`scripts/trace_check.py`
+がこの形を前提にする。`status` は `not_started` / `in_progress` / `completed` /
+`completed_with_issues` のいずれか。フェーズ固有の情報（名前・担当要件など）を足してよいが、
+担当要件の正は `docs/requirements.md` §5 と SKILL.md の `> 対応要件:` 行であり、ここには複製しない。
 
 **ステップ3.3：確認チェックリスト**
 ユーザーに提示：
@@ -382,6 +455,19 @@ init-task を完了する前に：
 - [ ] docs/ ファイルが簡潔かつ十分である（lorem ipsum がない）
 - [ ] skills/ の SKILL.md に実行可能な手順がある
 - [ ] CLAUDE.md がプロジェクト構造を正確に反映している
+
+**スターターを使った場合（フェーズ2 経由）も、次は必ず満たす**（古い版のスターターはこれらを持たないことがある。
+足りなければフェーズ1 の該当ステップを実行して補う）:
+- [ ] `docs/requirements.md` に `## 5. 機能要件（R-ID）` の表がある（ステップ1.2a）
+- [ ] 各 `skills/phase-NN/SKILL.md` の冒頭に `> 対応要件:` 行がある（ステップ1.5）
+- [ ] `docs/convergence.md` が `templates/convergence.md` の §0 形式で存在する
+- [ ] `small_implementation` なら `docs/tech-stack.md` に `## 4. 検証コマンド` がある
+- [ ] `metadata.json` の `phases` が辞書である（ステップ3.2）
+- [ ] 次の 2 つが exit 0 で終わる（`trace_check.py` は `missing_section` を出さない。`planned` は欠陥ではない）:
+  ```bash
+  python3 scripts/trace_check.py
+  python3 scripts/spec_check.py
+  ```
 
 ## 過去の学びとの統合
 

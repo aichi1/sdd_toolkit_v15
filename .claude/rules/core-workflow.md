@@ -13,16 +13,25 @@ Note: `/re-init-task → /run-phase N` のループは任意回数繰り返し�
 - Creates: docs/ (What), skills/ (How), CLAUDE.md, metadata.json
 - Requires: empty or new project directory
 - Completion: all docs/ have content (not template stubs), all SKILL.md exist
+- `docs/requirements.md` has `## 5. 機能要件（R-ID）` (read by `/analyze`; convention:
+  `docs/rules-reference/requirement-id-convention.md`); `docs/convergence.md` is copied from
+  `templates/convergence.md`; `metadata.json` `phases` is a dict keyed by phase number
 
 ## /run-phase
 - Input: phase number (`1`), range (`1-3`), or `all`
 - Flags: `--review-only`, `--no-validation`, `--checkpoint`, `--batch`
 - Flow per phase:
   1. Builder generates deliverables → `outputs/phase-{N}/`
-  2. Pre-check via `scripts/validate-outputs.py --phase {N}`
-  3. Fast-path (if pre-check PASS + ≤5 criteria + ≤3 files) or full Validator
-  4. PASS → next phase | NEEDS_REVISION → fix cycle (max 2 auto) | FAIL → escalate
-- Default multi-phase: Smart mode (auto-advance on PASS, pause on issues)
+  2. Pre-check via `scripts/validate-outputs.py --phase {N}` (listed deliverables must exist and be non-empty)
+  3. Fast-path (if pre-check PASS + ≤5 criteria + ≤3 files) or full Validator (+ optional expert
+     reviewers in parallel, chosen from `docs/team.md` and the actual diff)
+  4. Post-check the report: `validate-outputs.py --phase {N} --require-verification` and
+     `check_fix_cycle.py --phase {N}`
+  5. PASS → next phase | NEEDS_REVISION → fix cycle (max 2 auto) | FAIL → escalate
+- Validation reports are kept per round (`.validation/report-round{R}.md`); expert findings verbatim in
+  `.validation/expert-<agent>-round{R}.md`; deferred findings go to `findings-register.md`
+- Default multi-phase: Smart mode (auto-advance on PASS, pause on issues). Phases that change code
+  (`small_implementation`, or `.claude/`/`scripts/`) pause for confirmation even on PASS
 
 ## /re-init-task
 - Requires: all phases in current iteration completed or completed_with_issues

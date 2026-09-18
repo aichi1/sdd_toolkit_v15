@@ -98,7 +98,10 @@ Error: /re-init-task の前提条件を満たしていません。
 
 1. ユーザー回答に基づき、変更が必要な docs/ ファイルを特定する
 2. 各ファイルに対して:
-   - **追記**: 新機能要件を既存内容の後に追加（例: requirements.md に F6, F7 を追加）
+   - **追記**: 新機能要件は `docs/requirements.md` の **`## 5. 機能要件（R-ID）` の表に行として足す**
+     （続き番号の `R-NN`。「実現フェーズ」列には新しいフェーズ番号を書く）。表の外に書いた要件は
+     `/analyze`（`scripts/trace_check.py`）に読まれない（`docs/rules-reference/requirement-id-convention.md`）。
+     取り下げる要件は行を消さず `~~R-07~~` と打ち消し線にする
    - **更新**: 変更された制約やスコープを反映（既存内容は維持）
    - **新規作成**: 必要な場合のみ（質問5でユーザーが要求した場合）
 3. `docs/_manifest.json` を更新（新規ファイルがあれば `required_files` に追加）
@@ -110,7 +113,10 @@ Error: /re-init-task の前提条件を満たしていません。
 3. 各フェーズについて `skills/phase-{N}/SKILL.md` を作成:
    - テンプレート: カテゴリ別テンプレート（`templates/skills/{category}.md`）をベース
    - プレースホルダーをユーザー回答で埋める
+   - 冒頭の `> 対応要件: R-NN, ...` 行に、ステップ4 で §5 に足した要件のうちこのフェーズが担うものを書く
    - Input Requirements に前イテレーションの成果物を含める
+4. `python3 scripts/trace_check.py` を実行し、新しい要件が `planned` / `assigned` に現れ、
+   `orphan_skill` / `missing_section` が出ないことを確かめる
 
 ### ステップ6: metadata.json の更新
 

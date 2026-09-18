@@ -7,7 +7,7 @@
 
 ## Input Requirements
 
-- `docs/requirements.md` §5（機能要件の表）と §9（ID 規約）
+- `docs/requirements.md` の `## 5. 機能要件（R-ID）` の表（規約は `docs/rules-reference/requirement-id-convention.md`）
 - `skills/phase-*/SKILL.md` の `> 対応要件:` 行
 - `outputs/phase-*/.metadata.json` の `requirements_addressed`
 - `metadata.json` の `phases.N.status`（完了判定に使う）
@@ -43,10 +43,13 @@ python3 scripts/trace_check.py --markdown   # 対応表が必要なら
 
 ### Step 3: 分類ごとに読む
 
-**欠陥（exit 1 になる）**: `convention_violation` / `overdue` / `orphan_skill` / `orphan_output` /
-`phase_mismatch` / `not_delivered`
+**欠陥（exit 1 になる）**: `missing_section` / `convention_violation` / `overdue` / `orphan_skill` /
+`orphan_output` / `phase_mismatch` / `not_delivered`
 
 **欠陥ではない**: `planned`（担当 SKILL がまだ無い） / `assigned`（宣言済み・未完了） / `crosscutting`（`全`）
+
+`missing_section` が出たら、`docs/requirements.md` に `## 5. 機能要件（R-ID）` の見出しと表が無い。
+**要件を 1 件も読めていないので、他の結果（0 件）は何も意味しない**。規約に沿って表を足してから再実行する。
 
 `convention_violation` が出たら**それを先に直す**。「実現フェーズ」列が読めていない要件は、
 他の判定（overdue / phase_mismatch）も信用できない。

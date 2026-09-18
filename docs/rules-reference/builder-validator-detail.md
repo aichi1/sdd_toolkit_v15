@@ -141,13 +141,14 @@ OK例:
 検証レポートの各Issueに必須:
 ```markdown
 ### Issue #{N}: {簡潔なタイトル}
+- **Gate**: {0 / 1 / 2}（`3-only` は Critical にしない。Suggestions へ）
 - **Location**: {ファイル名} {行番号 or セクション}
 - **Problem**: {何が問題か}
 - **Required by**: {docs/XXX.md 要件Y} または {SKILL.md 品質基準Z}
 - **Current state**: {現状}
 - **Expected**: {期待される状態}
 - **Fix**: {具体的な修正方法}
-- **Priority**: Critical / Suggestion
+- **Priority**: High / Medium（Critical と Suggestion の区別は「## Critical Issues」「## Suggestions」の節で表す）
 
 例（良い指摘）:
   Location: comparison-table.md 行15-20
@@ -223,7 +224,7 @@ Validator検証後、Builderに返す情報:
 
 **検証レポート:**
 ```
-outputs/phase-{N}/.validation/report.md
+outputs/phase-{N}/.validation/report-round{R}.md（巡ごと。上書きしない）と、同じ内容の report.md
 
 内容:
   - Overall Status (PASS/NEEDS_REVISION/FAIL)
@@ -259,12 +260,14 @@ Builder修正完了後:
   ...
   "revision_history": [
     {
-      "iteration": 2,
+      "cycle": 1,
+      "opened_by": "validator_critical",   // 必須。validator_critical / expert_defect / owner_decision / main_session
       "builder_session_id": "uuid-2",
       "timestamp": "...",
       "issues_addressed": [1, 3],  // Issue #1, #3を修正
       "changes": "comparison-tableに価格列追加、引用形式修正",
-      "files_modified": ["comparison-table.md"]
+      "files_modified": ["comparison-table.md"],
+      "rechecked": ["python3 scripts/validate-outputs.py --phase 2 → exit 0"]   // 修正後の再検査
     }
   ]
 }

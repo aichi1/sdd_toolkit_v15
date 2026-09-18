@@ -204,29 +204,38 @@ Validatorが検証しやすくなる
 {
   "revision_history": [
     {
-      "iteration": 2,
+      "cycle": 1,
+      "opened_by": "validator_critical",
       "changes": "Validatorの指摘に基づき、競合比較表に価格列を追加",
-      "validator_issue_ids": [1, 3]
+      "validator_issue_ids": [1, 3],
+      "rechecked": ["python3 scripts/validate-outputs.py --phase 2 → exit 0"]
     }
   ]
 }
 ```
 
+- **`opened_by`（必須）**: この修正サイクルを開いた根拠。メインセッションから渡された値を書く。
+  `validator_critical` / `expert_defect`（`.validation/expert-<agent>-round<R>.md` の ID を
+  `expert_issue_ids` に添える）/ `owner_decision` / `main_session` の 4 値のみ
+  （`scripts/check_fix_cycle.py` の `fix_cycle_opened_by` が検査する）
+- `rechecked`: 下の「修正後の再検査」で実行したコマンドと exit code
+
 **3巡目以降のルール（C-51）**: `revision_history` が3巡以上に達し、かつまだ最終的な
 `pass` に至っていない場合、**最後の要素に空でない `owner_decision` を必ず記録する**。
 「まだ直す」と「ここで Accept して先へ進む」は毎巡、対等な選択肢として提示すること
 ——Accept は「何巡も繰り返して直らなかった場合の最終手段」ではなく、3巡目から常に
-選べる選択肢である（Phase 07 が 11 巡した主因は、Builder が 8 回連続でこの選択肢を
-一度も対等に提示しなかったことだった。`CLAUDE.md`「11 巡で収束しなかった理由」参照）。
+選べる選択肢である（ツールキット開発で 1 フェーズが 11 巡した主因は、Builder が 8 回連続で
+この選択肢を一度も対等に提示しなかったことだった）。
 
 ```
 3巡目の記録例（残存する指摘が Gate 3-only のみで Accept する場合）:
 {
   "revision_history": [
-    { "iteration": 1, "changes": "..." },
-    { "iteration": 2, "changes": "..." },
+    { "cycle": 1, "opened_by": "validator_critical", "changes": "..." },
+    { "cycle": 2, "opened_by": "expert_defect", "expert_issue_ids": ["security-round1 #2"], "changes": "..." },
     {
-      "iteration": 3,
+      "cycle": 3,
+      "opened_by": "owner_decision",
       "changes": "Critical Issues 0件。残る指摘は Gate 3-only の Suggestion のみ",
       "owner_decision": "Accept: Gate 0-2 と機械検査はすべて green。Gate 3-only の指摘は Suggestion として持ち越し、先へ進む"
     }
@@ -234,8 +243,36 @@ Validatorが検証しやすくなる
 }
 ```
 
-機械検査: `scripts/check_fix_cycle.py --phase N`（`check_cutoff_rule`）が、3巡以上・未 pass
-なのに最後の要素に `owner_decision` が無ければ fail する（`docs/io-spec.md` §2.5.2）。
+機械検査: `scripts/check_fix_cycle.py --phase N` が、(1) 3巡以上・未 pass なのに最後の要素に
+`owner_decision` が無い、(2) `opened_by` が無い・4 値の外、のどちらでも fail する（`docs/io-spec.md` §2.5.2）。
+
+### 修正後の再検査（修正サイクルで必須。v15.1）
+
+指摘を直したら、**報告の前に**次を行い、実行したコマンドと exit code を報告と `revision_history[].rechecked` に書く。
+「直した」だけの報告はしない。
+
+1. **その指摘を見つけた検査を、同じ形で再実行する**（Validator が実行したコマンド、専門家の再現手順、
+   数え上げのコマンド）。出力は `verification.log` に**追記**する
+2. 直した対象が「**一致すべき組**」に属するなら、**組の全員**を数え直す。例: 件数を直したら、
+   同じ件数を書いている README・`change-report.md`・表の合計・見出しをすべて。
+   結論（「未確認」→「確認済み」など）を変えたら、**古い文言を全ファイルで grep する**。
+   grep のパターンは、古い文言を実際に引用して作り、**直す前のファイルでそのパターンが既知の箇所に
+   当たることを先に確かめてから**「残り 0 件」と結論する（狭すぎるパターンは 0 件を返すだけで何も示さない）
+3. 報告の前に機械検査（`scripts/validate-outputs.py --phase N`、プロジェクトの検証コマンド）を回す
+
+> 別製品の開発工程の記録では、2 巡目以降の指摘の 37.9% が**前の巡の修正そのものが生んだ回帰**
+> （直したことで別の記録・文言が古くなる型）で、巡を駆動していたのはこれだった。
+
+### 数えてから書く（v15.1）
+
+成果物・`change-report.md`・`verification.log` に書く**数値**（テスト件数、commit 数、行数、grep のヒット数、
+変更ファイル数）は、**先にそのコマンドを実行し、出力を `verification.log` に貼ってから**本文に書く。
+記憶・見積もり・他人の申告を書き写さない。**書いたあとに数え直すのではなく、数えてから書く**。
+別製品の開発工程では、1 フェーズで Builder が「実行する前に数字を書く」を 5 回踏んだ（依頼文に書くだけでは止まらなかった）。
+
+**ログは追記だけ**: `verification.log` などの生ログは `>>` で追記し、Edit ツールで書き換えない
+（Edit はファイル全体を書き戻すため、不正な UTF-8 のバイトを置き換えて過去の記録を変えてしまう。
+ハッシュで証拠を取っている場合は検証が崩れる）。
 
 ## 典型的なワークフロー
 
@@ -296,6 +333,7 @@ Builderが完了時に準備すべき情報：
     "docs/competitors.md"
   ],
   "previous_phase_used": "outputs/phase-01/analysis.md",
+  "requirements_addressed": ["R-03", "R-04"],
   "deliverables": [
     {
       "file": "comparison-table.md",
@@ -309,27 +347,40 @@ Builderが完了時に準備すべき情報：
       "status": "pending_validation"
     }
   ],
+  "revision_history": [],
   "builder_notes": "全手順完了。SKILL.mdのQuality Criteriaを意識して作成したが、検証はValidatorに委ねる"
 }
 ```
+
+- `requirements_addressed`: このフェーズで**実際に対応した** R-ID の配列（`docs/requirements.md` §5 の ID。
+  `/analyze` が読む唯一の申告。`docs/rules-reference/requirement-id-convention.md` §5）
+- `deliverables`: 列挙したファイルはプリチェック（`scripts/validate-outputs.py`）が 1 件ずつ実在と非空を確かめる。
+  パスは `outputs/phase-{N}/` 基準（in-place の成果物ならプロジェクトルート基準）
 
 ### Validator → Builder のフィードバック受信
 
 Validatorから修正指示が来た場合：
 
 ```markdown
-# Validation Report
+# Validation Report: Phase 2 — Round 1
 
 ## Critical Issues
-1. 【Issue #1】競合比較表に価格列が欠落
-   - Location: comparison-table.md
-   - Required by: docs/scope.md - "価格比較を含めること"
-   - Fix: 価格列を追加し、docs/competitors.mdから価格情報を転記
 
-2. 【Issue #2】評価基準が不明確
-   - Location: evaluation-summary.md
-   - Required by: skills/phase-02/SKILL.md - "評価軸を明示すること"
-   - Fix: 評価軸（機能性、拡張性、コスト）を冒頭に追加
+### Issue #1: 競合比較表に価格列が欠落
+- **Gate**: 1
+- **Location**: comparison-table.md
+- **Required by**: docs/scope.md - "価格比較を含めること"
+- **Current state**: 価格列が無い
+- **Expected**: 3社の価格列がある
+- **Fix**: 価格列を追加し、docs/competitors.mdから価格情報を転記
+
+### Issue #2: 評価基準が不明確
+- **Gate**: 2
+- **Location**: evaluation-summary.md
+- **Required by**: skills/phase-02/SKILL.md - "評価軸を明示すること"
+- **Current state**: 評価軸の記述が無い
+- **Expected**: 冒頭に評価軸がある
+- **Fix**: 評価軸（機能性、拡張性、コスト）を冒頭に追加
 ```
 
 Builderの対応：
@@ -337,8 +388,9 @@ Builderの対応：
 1. Issue #1のみ修正（価格列追加）
 2. Issue #2のみ修正（評価軸追加）
 3. 他の部分は変更しない（過剰修正を避ける）
-4. metadata.jsonにrevision記録
-5. 再度Validatorへ
+4. 修正後の再検査（指摘を見つけた検査の再実行と、一致すべき組の数え直し）
+5. metadata.jsonの revision_history に cycle / opened_by / changes / rechecked を記録
+6. 再度Validatorへ
 ```
 
 ## デバッグとトラブルシューティング

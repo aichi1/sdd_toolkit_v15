@@ -3,13 +3,25 @@
 Stop hook:
 - outputs/ に成果物があるのに /finalize が未実行の場合、または outputs/phase-NN/ に
   .validation/ が無いフェーズがある場合、次ターンで Claude に継続を促す（R-09 / C-08）。
-- **確定スキーマ**（Claude Code 2.1.260。`outputs/phase-01/claude-code-capabilities.md` 付録 G）に従う。
-  `decision: "block"` ではなく `hookSpecificOutput.permissionDecision` を使う。
-- **無限ループ防止**（K-06）: Claude Code 側に安全網が無い（付録 G-2）ため、`session_id` をキーにした
+- ツールキット開発プロジェクトが Claude Code 2.1.260 で調べたスキーマ（同プロジェクトの調査記録。
+  本リポジトリには無い）に従い、`decision: "block"` ではなく `hookSpecificOutput.permissionDecision` を使う。
+- **無限ループ防止**（K-06）: 当時の調査では Claude Code 側に安全網が無かったため、`session_id` をキーにした
   ファイルベースのカウンタで継続指示（permissionDecision: "deny"）の発火回数を上限 2 回に制限する。
   上限到達後は permissionDecision を返さず、リマインド表示のみに戻る。
 - **例外時は常に exit 0**（R-10）。カウンタ自体が壊れても exit 0 とし、読めない場合は
   「上限到達」として安全側に倒す（継続指示を出さない）。
+
+v15.1:
+- **`stop_hook_active` が真なら継続指示を出さない**（停止を許可する）。Claude Code 2.1.276 は
+  「Stop hook は stop_hook_active が真の間は成功を返すこと」と案内し、連続して止めると強制終了する。
+  v15.0 はこのフィールドを読まず、カウンタが書けない環境（`.claude/hooks/` が書込み不可など）では
+  毎回継続指示を返し続けた。
+- **カウンタを書けなかったら上限到達とみなす**（読めない場合と同じ安全側）。
+- プロジェクトルートは `CLAUDE_PROJECT_DIR`（無ければ stdin の `cwd`）。サブディレクトリへ `cd`
+  した後でもリマインドが黙って無効にならないように。
+- `systemMessage` をトップレベルにも置く（`hookSpecificOutput` の中の `systemMessage` は認識されない）。
+- 継続指示の出力形式（`hookSpecificOutput.permissionDecision`）は、公式の Stop フックのスキーマで
+  確認できていない（未検証）。v15.1 では形式を変えず、上の停止保証だけを足した。
 """
 import json
 import os
@@ -40,13 +52,15 @@ def _read_fire_count(path: str) -> int:
         return MAX_FIRE_COUNT
 
 
-def _write_fire_count(path: str, count: int) -> None:
+def _write_fire_count(path: str, count: int) -> bool:
+    """カウンタを書く。書けなければ False（呼び出し側は上限到達として扱う。v15.1）。"""
     try:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         with open(path, "w", encoding="utf-8") as f:
             json.dump({"count": count}, f)
+        return True
     except Exception:
-        pass  # R-10: カウンタが書けなくてもターンは止めない
+        return False  # R-10: カウンタが書けなくてもターンは止めない
 
 
 def _collect_reasons(cwd: str):
@@ -99,7 +113,9 @@ def main():
         sys.exit(0)  # R-10: 壊れた入力でもターンを止めない
 
     try:
-        cwd = data.get("cwd", os.getcwd())
+        if not isinstance(data, dict):
+            sys.exit(0)
+        cwd = os.environ.get("CLAUDE_PROJECT_DIR") or data.get("cwd") or os.getcwd()
         session_id = data.get("session_id", "")
 
         reasons = _collect_reasons(cwd)
@@ -109,16 +125,24 @@ def main():
 
         reason_text = " / ".join(reasons)
 
+        if data.get("stop_hook_active") is True:
+            # 既にこのフックの継続指示で動いている（v15.1）: 停止を許可し、リマインド表示のみ
+            json.dump({"systemMessage": "SDD リマインド: " + reason_text}, sys.stdout,
+                      ensure_ascii=False)
+            sys.exit(0)
+
         if not session_id:
             # session_id が無い場合は回数管理を諦め、リマインド表示のみに戻す（フォールバック）
-            json.dump({"systemMessage": "SDD リマインド: " + reason_text}, sys.stdout)
+            json.dump({"systemMessage": "SDD リマインド: " + reason_text}, sys.stdout,
+                      ensure_ascii=False)
             sys.exit(0)
 
         state_path = _state_path(cwd, session_id)
         fire_count = _read_fire_count(state_path)
 
-        if fire_count >= MAX_FIRE_COUNT:
-            # 上限到達（K-06）: permissionDecision を返さずリマインド表示のみ
+        if fire_count >= MAX_FIRE_COUNT or not _write_fire_count(state_path, fire_count + 1):
+            # 上限到達（K-06）、またはカウンタを書けない（v15.1: 回数を数えられないので上限扱い）:
+            # permissionDecision を返さずリマインド表示のみ
             json.dump(
                 {
                     "systemMessage": (
@@ -126,12 +150,12 @@ def main():
                     ).format(MAX_FIRE_COUNT, reason_text)
                 },
                 sys.stdout,
+                ensure_ascii=False,
             )
             sys.exit(0)
 
-        _write_fire_count(state_path, fire_count + 1)
-
         result = {
+            "systemMessage": "SDD: " + reason_text,
             "hookSpecificOutput": {
                 "hookEventName": "Stop",
                 "permissionDecision": "deny",

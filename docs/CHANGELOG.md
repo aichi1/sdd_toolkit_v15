@@ -1,5 +1,87 @@
 # Changelog
 
+## v15.1 (2026-09-18) — 安定版としての不具合修正と、実運用データに基づく工程改善
+
+v15.0 の状態は git タグ **`v15.0-baseline`**（13c0e0f）に固定した。v15 を工程として別製品（sdd-harness）を
+20 フェーズ開発した兄弟プロジェクトの記録（修正サイクルの指摘 181 件の分類）と、v15 で作られた利用者プロジェクトの
+実物を読んで洗い出した。**`/eval` による再採点はしていない**（7 軸の点数は v15.0 のまま）。
+
+### Fixed — 検査が黙って通していた・落ちていたもの
+
+- **`check_fix_cycle.py`**: run-phase SKILL.md 自身の報告雛形（`### Critical Issues` + 太字なしの `- Location:`）どおりに
+  書かれた報告を「Critical Issue 0 件」として素通りさせていた（Gate 欄なし・一貫性だけの Critical でも OK）。
+  `###` 以下の Critical 見出しと素の `Location:` を読むように。壊れた `.metadata.json` は skip ではなく fail、
+  存在しないフェーズ・整数でない `--phase` は exit 2
+- **`trace_check.py`（/analyze）**: `docs/requirements.md` に `## 5. 機能要件（R-ID）` が無いと「要件 0 件・欠陥 0 件・OK」を
+  返していた → `missing_section`（欠陥）。`metadata.json` の `phases` が配列だと AttributeError で落ちていた（実プロジェクトで再現）
+  → 配列も読む。列の足りない要件行を黙って捨てていた → `convention_violation`。存在しない `--project-dir` は exit 2
+- **`spec_check.py`**: `/home/...`・`/usr/bin/...`・`/notes.md` をスラッシュコマンドと誤認していた（拡張子で除外するはずの
+  関数は一度も真にならないデッドコードだった）。存在しない `--project-dir` は exit 2
+- **`validate-outputs.py`**: `.metadata.json` の `deliverables` に挙げたファイルが欠落・0 バイトでも PASS だった
+  （Gate 0 違反がファストパスで Validator を飛ばしうる）→ 1 件ずつ実在と非空を検査。`--require-verification` が
+  `**Overall Status: PASS**` などの書式で判定語を読めず、exit≠0 の行があっても「整合」と判定していた → 閉じた書式集合で読み、
+  読めなければ fail。非 UTF-8 のファイルで落ちていた
+- **`check_constitution.py`**: `--article` 省略時にツールキット自己改善専用の第3/4/10/11 条まで実行していた → 既定は汎用の
+  第2条のみ、`--profile toolkit` で全条。実装の無い条番号を指定すると「0 件実行・OK」だった → exit 2
+- **`knowledge_curator.py`（C-57）**: `candidates.jsonl` への無条件追記 → 既存キーを見て新規だけ追記
+- **`promote_candidates.py`**: 圧縮が curator 候補（`/retrospective` の出力）を全件消していた → コンポーネント候補以外の行を残す
+- **`extract_components.py`**: 同一バッチ内の重複、数字でないフェーズディレクトリでのクラッシュ
+- **`aggregate_outputs.py`**: 改名後の名前が実在ファイルと衝突すると上書きしていた（C-45 の再発）
+- **`metrics.py`**: git 管理外でクラッシュ、`--markdown` がテスト失敗を隠して exit 0 → failed 件数と exit code を表示し exit 1
+- **`.claude/settings.json` のフック（オーナー承認済み）**: PreToolUse / PostToolUse の matcher（`Write(outputs/**)` など）は
+  JavaScript の正規表現として不正で、**v15.0 ではこの 3 フックが一度も起動していなかった** → matcher を `Write|Edit` / `Write` に。
+  `/finalize` と重複する `post-phase-complete.sh` の登録は外した
+- **hooks のスクリプト**: 出力キー `message` は Claude Code が認識しない → `systemMessage`。`tool_input.file_path` は絶対パスで渡るのに
+  `startswith("outputs/")` で判定していた → プロジェクトルート（`CLAUDE_PROJECT_DIR`）相対で判定。Stop フックが
+  `stop_hook_active` を読まず、カウンタを書けない環境で継続指示を返し続けた → 停止を許可
+- **`/converge`**: 記録先 `docs/convergence.md` をどこも作らないのに「新規ファイルは作らない」と定めており、利用者の
+  プロジェクトで一度も実行できなかった → `templates/convergence.md` を新設し、無ければそこから作る
+- **`/init-task`**: `requirements.md` の §5（R-ID 表）、`metadata.json` の `phases` の形、`tech-stack.md` §4（Validator が
+  全件実行する検証コマンド）、`io-spec.md` §2.5.2・§2.6 の中身を規定していなかった → 規定し、スターター経由でも満たすよう品質ゲートに加えた。
+  `/re-init-task` も新しい要件を §5 の表に足すよう直した
+- **`check_constitution.py` の「改正履歴の追認状況」検査**は第3条の中にしか無く、利用者のプロジェクトでは実行されなかった →
+  条番号に依存しない「改正手続き」の検査として既定でも走る
+
+### Fixed — 文書どうしの矛盾
+
+- `validator.md` の判定疑似コードが「Critical 3 件以下なら NEEDS_REVISION」で規則（1〜5 件）と食い違っていた
+- `validator.md` の一貫性チェックの疑似コードと「パターン3」が、一貫性だけの指摘を Critical にしていた（C-50 と矛盾）
+- run-phase の報告雛形に `Gate` / `Required by` が無く、rules の Validator Rule 3 と矛盾していた
+- run-phase の「エージェント定義」節が Validator を「読み取り専用コマンドのみ」と書き、検証コマンドを実行させる Step 2.3 と矛盾していた
+- run-phase Step 3.3（2 巡後は「auto-fix を続けるか手動に切り替えるか」）が、rules の打ち切り規則（Accept を対等な選択肢に・
+  `owner_decision`）と食い違っていた
+- 利用者のプロジェクトでは別物を指す開発リポジトリの参照のうち、**手順や事実の記述になっていたもの**
+  （`outputs/phase-14/change-report.md` §3、「既存フェーズ 01〜14 は…」、`docs/constraints.md` §3.1、
+  `CLAUDE.md`「11 巡で収束しなかった理由」など）を一般的な記述に置き換えた。出典として括弧で付いているだけの
+  内部 ID（`R-06`・`C-50`・`Phase 14` など）は残している
+
+### Added — 実運用データに基づく工程改善（兄弟プロジェクトの 181 件の分類から）
+
+- **巡ごとの報告保存**: `.validation/report-round{R}.md`（上書きしない）+ `report.md`（最新）。過去巡の原文が 4 フェーズで消え、原因分析ができなかった
+- **専門家レビューの枠（run-phase Step 2.5）**: `docs/team.md` と実 diff で選び、Validator と同じ巡で並行起動。指摘は
+  `.validation/expert-<agent>-round{R}.md` に原文で残す（10 フェーズすべてで一行要約しか残っていなかった）。判定は全員が返ってから
+- **`revision_history[].opened_by`**（`check_fix_cycle.py` が検査）。「Critical 0 なのにサイクルがある」は違反にしない
+- **修正後の再検査**（builder.md）: 指摘を見つけた検査を再実行し、「一致すべき組」を数え直してから報告する。2 巡目以降の指摘の 37.9% が回帰だった
+- **数えてから書く**（builder.md・rules）。**形式だけの指摘は修正サイクルを開かない**（出荷物が事実と違う場合を除く）
+- **小さな指摘は巡を回さずに閉じてよい**条件（直前の Validator が PASS で、閉じるのが Suggestion・形式・専門家の Medium/Low・
+  記録の訂正に限られ、成果物の主張を変えない。機械検査は必ず回す。Validator の Critical と専門家の High には使えない）
+- **指摘の登録簿** `templates/findings-register.md`（`.phase-context.json` の `pending_issues` は上書きされて消えるため）
+- **Builder の 2 段階起動**（設計判断を含むフェーズ）、**スマートモードでもコード変更フェーズは PASS 後に確認**、
+  セッション再開時は起動済みエージェントを確かめてから再起動
+- `spec_check.py` の許可リストに `excludes`（履歴文書）と `resolve_roots`（製品を別リポジトリに置く構成）。ツールキット単体の
+  検出は 26 件（24 件が CHANGELOG の履歴参照、1 件が `memory-policy.md` の開発リポジトリ参照、1 件が `/run-phase` の生成物への
+  前方参照）→ 0 件
+- `docs/rules-reference/requirement-id-convention.md`（要件 ID 規約。開発プロジェクトの requirements.md §9 から移設）
+- 専門家エージェントの原本（`templates/agents/*.md`）に、原文の書き出し先と構造化形式
+
+### 未対応
+
+- `/eval` による再採点（7 軸の点数は v15.0 のまま）
+- `eval/runner.py`（コードを読んで挙動は確認。設計意図かは未確認のため未修正）: `--live` なしの実行でも
+  `eval/summary_trajectory.csv` に `not_run` 行を毎回追記する。Judge の採点は標準出力に出すだけで
+  `eval/runs/<id>/<scenario>/score.json` には保存しない（`aggregate.py` はこのファイルを読む）
+- Stop フックの継続指示の出力形式（`hookSpecificOutput.permissionDecision`）は公式スキーマで確認できていない
+
 ## v15 (2026-09-06) — Iteration 3「機能追従・評価基盤の刷新と検査基盤の信頼性」
 
 自己評価: **総合 4.286**（v14.0 は 4.143、+0.143）。`eval/reports/2026-09-06_v15.0.md`

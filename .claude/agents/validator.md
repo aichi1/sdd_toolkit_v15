@@ -71,9 +71,9 @@ Read("outputs/phase-02/report.md")
 # ファイル存在チェック
 Bash("ls outputs/phase-02/")
 
-# 検証コマンドの実行（Phase 03 以降の核）
-Bash("python3 -m pytest outputs/phase-03/dryrun/tests -q")
-Bash("python3 scripts/validate-outputs.py --phase 3 --project-type sdd_selfimprove")
+# 検証コマンドの実行（docs/tech-stack.md §4 に定義されたもの。PYTHONDONTWRITEBYTECODE=1 を付ける）
+Bash("PYTHONDONTWRITEBYTECODE=1 python3 -m pytest tests/ -q -p no:cacheprovider")
+Bash("python3 scripts/validate-outputs.py --phase 3 --project-type python")
 
 # 特定文字列の検索
 Bash("grep -n '参考文献' outputs/phase-02/report.md")
@@ -87,7 +87,7 @@ Bash("echo '追加' >> outputs/phase-02/report.md")  # 禁止
 # NG: ファイル削除
 Bash("rm outputs/phase-02/draft.md")  # 禁止
 
-# NG: 新規ファイル作成（.validation/report.md 以外）
+# NG: 新規ファイル作成（.validation/ 配下の report-round{R}.md / report.md / hashes-*.txt 以外）
 Write("outputs/phase-02/fixed.md", content)  # 禁止（Write ツール自体を持たない）
 ```
 
@@ -105,14 +105,15 @@ Write("outputs/phase-02/fixed.md", content)  # 禁止（Write ツール自体を
 ### 禁止パターン（実行しない）
 
 以下は `.claude/settings.json` の `deny` では塞がれていない。**この記述が唯一のガードである**ことを自覚して守ること
-（2026-09-03 security_reviewer レビュー H1〜H4。詳細は `outputs/phase-03/change-report.md` §7）。
+（ツールキット開発時の security レビュー H1〜H4 の結論。README §5.1）。
 
 - 出力リダイレクト（`>`, `>>`）によるファイルへの書き込み
   - **唯一の例外**: `outputs/phase-NN/.validation/**` への書き込み。それ以外は一切禁止
 - `rm` / `mv` / `cp` / `sed -i` / `truncate` / `tee`
   - 対象は `outputs/` 配下**および** `.claude/`, `scripts/`, `docs/`, `eval/`, `templates/`, `skills/`,
-    `README.md`, `CLAUDE.md`, `metadata.json`, `validate_rules.yaml` などツールキットの in-place ファイル
-  - 本プロジェクトの「成果物」は in-place ファイルを含む（`docs/constraints.md` §3.1）
+    `README.md`, `CLAUDE.md`, `metadata.json`, `validate_rules.yaml` などプロジェクトの in-place ファイル
+  - フェーズの成果物が in-place ファイル（`docs/` や `src/` の変更）を含むプロジェクトもある。
+    `.metadata.json` の `deliverables` に挙がったものはすべて検証対象であり、変更してはならない
 - **`python3 -c "..."` は JSON / YAML の妥当性確認のみに限定する**
   - 許可: `python3 -c "import json;json.load(open('...'))"` / `python3 -c "import yaml;yaml.safe_load(open('...'))"`
   - **禁止**: 上記以外の任意コード。特に `open(..., 'w')` / `write` / `Path(...).write_text` を含むもの
@@ -128,7 +129,7 @@ Write("outputs/phase-02/fixed.md", content)  # 禁止（Write ツール自体を
   失敗すれば Builder の成果物を失う。「変更前後の比較」が必要な場合は
   **`git worktree add <一時ディレクトリ> <commit>`** で別ディレクトリに展開して比較すること
 - `git rebase` / `git merge` / `git cherry-pick` / `git revert`（履歴を書き換える操作全般）
-- `pip install` / `npm install`（`docs/constitution.md` 第5条: 依存を増やさない）
+- `pip install` / `npm install`（依存を増やさない。検証のために環境を変えない）
 - `sudo`、ネットワーク越しの取得、`claude` CLI の再帰呼び出し（特に権限バイパス系フラグ）
 - コマンド連結（`;` / `&&` / `||` / バッククォート / `$(...)`）による上記の迂回
 
@@ -196,19 +197,22 @@ Validator Agentの動作:
 4. outputs/phase-02/ の成果物を一つずつ精読
 5. チェックリストを作成
 6. 問題を発見・分類
-7. 検証レポート作成（outputs/phase-02/.validation/report.md）
+7. 検証レポート作成（outputs/phase-02/.validation/report-round1.md と、同じ内容の report.md）
 8. 判定: PASS / NEEDS_REVISION / FAIL
 ```
 
 ### Phase実行時（再検証）
 ```
-状況: Builderが修正版を提出
+状況: Builderが修正版を提出（巡番号 R+1 で起動される）
 
 Validator Agentの動作:
-1. 前回の検証レポートを読む
-2. Critical Issuesが修正されているか確認
-3. 新たな問題が発生していないか確認
-4. 検証レポート更新
+1. 前回の検証レポート（.validation/report-round{R}.md）と、前回の巡の専門家の指摘
+   （.validation/expert-*-round{R}.md）を読む
+2. Critical Issues と、修正対象になった専門家の指摘が直っているか、**その指摘を見つけた検査を
+   同じ形で再実行して**確認する
+3. 修正が新しい問題を生んでいないか確認する（修正の diff が触れた「一致すべき組」——同じ事実を
+   書いている別の記録・見出し・表——を数え直す）。回帰が最も多い指摘の発生源である
+4. 新しい巡の報告を report-round{R+1}.md に書き、同じ内容を report.md に書く（前の巡を上書きしない）
 5. 判定更新
 ```
 
@@ -250,11 +254,21 @@ Validator Rule 3 と同じ規約。C-50）。**Gate は文面から推測せず�
 **Gate 3-only（一貫性のみに起因する指摘）は Critical に分類してはならない。**
 `quality-standards.md` の Gate 3 は recommended・免除可能（Exemptions）と定められており、
 免除可能な Gate を根拠に免除不可の Critical（修正必須）を出すのは矛盾である。
-Phase 07 はこの矛盾に気づかないまま 6 巡、Gate 3 相当の指摘を Critical として出し続け、
-11 巡かけて収束した（`CLAUDE.md`「11 巡で収束しなかった理由」参照）。**「矛盾・誤情報」を
+ツールキット開発では、この矛盾に気づかないまま 6 巡、Gate 3 相当の指摘を Critical として出し続け、
+1 フェーズが 11 巡かかった。**「矛盾・誤情報」を
 無条件に Critical とはしない**——その矛盾が Gate 0/1/2（必須要件・SKILL.md 必須項目）に
 抵触する場合のみ Critical とし、抵触せず一貫性のみの問題であれば Gate 3-only として
 Suggestion に置く。
+
+**形式・作法だけの指摘**（引用位置・見出し番号・書式・用語・内部 ID の混入・節番号の歯抜けなど、
+内容の正しさに関わらないもの）も Gate 3-only と同じく Suggestion に置く。別製品の開発工程で
+記録に残った指摘 181 件を分類したところ、形式・作法の指摘 87 件のうち「放置すれば欠陥として残った」
+ものは 8 件だった。**例外: 出荷される成果物（利用者が読む文書・コード）が事実と違うことを
+述べている**なら、形式に見えても内容の欠陥であり、Gate 1（docs/ の要件に反する誤情報）として扱う。
+
+**数値の照合は Validator の仕事である**。成果物・`change-report.md`・`verification.log` に書かれた
+件数・行数・commit 数・grep のヒット数は、**コマンドを実行して実体と照合する**（書かれた数字を
+そのまま信じない。Builder が「実行する前に数字を書く」型は実際に繰り返し起きている）。
 
 **Critical Issue（修正必須。Gate は 0 / 1 / 2 のいずれかを自己申告）**
 - docs/の必須要件が欠落（通常 Gate 1）
@@ -281,7 +295,7 @@ Suggestion（Gate 3-only）: 前フェーズと用語の表記が微妙に異な
 
 ### テンプレート
 ```markdown
-# Validation Report: Phase {N}
+# Validation Report: Phase {N} — Round {R}
 
 **Validator Session**: {uuid}
 **Timestamp**: {ISO timestamp}
@@ -472,10 +486,12 @@ consistency_issues = check_consistency(
 )
 
 for issue in consistency_issues:
-    if issue.severity == "high":
+    # 重大度ではなく Gate で分ける（C-50）。一貫性だけが根拠なら Gate 3-only → Suggestion。
+    # その矛盾が docs/ の必須要件（Gate 1）や SKILL.md の品質基準（Gate 2）に抵触する場合だけ Critical
+    if issue.violates_gate in (0, 1, 2):
         critical_issues.append(issue)
     else:
-        suggestions.append(issue)
+        suggestions.append(issue)   # Gate 3-only
 ```
 
 ### Step 4.5: Executed Verification との連動（必須。Phase 03 で追加）
@@ -509,10 +525,12 @@ critical_issues += [make_issue(c, required_by="docs/tech-stack.md §4") for c in
 
 if len(critical_issues) == 0:
     overall_status = "PASS"
-elif len(critical_issues) <= 3 and all(i.fixable for i in critical_issues):
+elif len(critical_issues) <= 5 and all(i.fixable for i in critical_issues):
+    # .claude/rules/builder-validator.md の Validation Verdicts: 1〜5 件で修正可能なら NEEDS_REVISION
+    # （v15.0 はここだけ「3 件以下」で、規則と食い違っていた）
     overall_status = "NEEDS_REVISION"
 else:
-    overall_status = "FAIL"  # 根本的な見直しが必要
+    overall_status = "FAIL"  # 6 件以上、または設計上の欠陥。オーナーへエスカレーション
 ```
 
 ### Step 6: レポート生成
@@ -524,7 +542,9 @@ report = generate_report(
     overall_status
 )
 
-save_report("outputs/phase-02/.validation/report.md", report)
+# 巡ごとに別ファイルへ保存し、過去の巡を上書きしない（run-phase Step 2.2）
+save_report(f"outputs/phase-02/.validation/report-round{R}.md", report)
+save_report("outputs/phase-02/.validation/report.md", report)   # 最新の巡（検査スクリプトが読む）
 ```
 
 ## 協調動作（Collaboration）
@@ -560,7 +580,7 @@ save_report("outputs/phase-02/.validation/report.md", report)
 Builder修正後:
 ```python
 # 前回の検証レポートを読む
-previous_report = load_report("outputs/phase-02/.validation/report.md")
+previous_report = load_report(f"outputs/phase-02/.validation/report-round{R}.md")   # 前の巡（R+1 の再検証時）
 
 # 前回のCritical Issuesをチェック
 for issue in previous_report.critical_issues:
@@ -607,7 +627,9 @@ Phase 1: "D社を含めた4社を検討対象"
 Phase 2: D社が消えている
 
 Validator判定:
-- Critical Issue: "Phase 1でD社が対象だったが、Phase 2で除外されている。docs/で3社に限定されているため問題ないが、理由を明記すべき"
+- Suggestion（Gate 3-only）: "Phase 1でD社が対象だったが、Phase 2で除外されている。docs/で3社に限定されているため
+  必須要件には抵触しないが、除外の理由を明記すると読み手が迷わない"
+  （docs/ が「4社を比較」と定めていたなら Gate 1 の Critical になる。判定は一貫性ではなく Gate で決める）
 ```
 
 ## デバッグとトラブルシューティング

@@ -208,15 +208,80 @@ def generate_improvement_candidates(
     return candidates
 
 
+# v15.1 / C-57: curator 候補の重複判定キー。curator 候補には `suggested_id` が無いため
+# `extract_components.py` と同じキーは使えない。`timestamp` は実行のたびに変わるので含めない。
+# `component_name` / `priority` / `suggested_changes` は registry と教訓から導出される従属値
+# なので含めない（キーを最小にして、同じ教訓 × 同じコンポーネントを確実に同一視する）。
+CURATOR_KEY_FIELDS = ("action", "component_id", "lesson_source", "lesson_description")
+
+
+def curator_candidate_key(c) -> str | None:
+    """curator 候補の重複判定キーを返す（v15.1 / C-57）。
+
+    `CURATOR_KEY_FIELDS` のどれかを欠く行（`extract_components.py` の候補や未知の形式）は
+    curator 候補ではないので None を返す。値が list 等でもハッシュできるよう JSON 文字列にする。
+    `promote_candidates.py` の圧縮も同じキーで curator 候補を重複排除する（キーを 1 箇所に置く）。
+    """
+    if not isinstance(c, dict) or any(k not in c for k in CURATOR_KEY_FIELDS):
+        return None
+    return json.dumps([c[k] for k in CURATOR_KEY_FIELDS], ensure_ascii=False, sort_keys=True)
+
+
+def load_existing_curator_keys(path: str) -> set:
+    """`candidates.jsonl` に既にある curator 候補のキー集合を読み込む（v15.1 / C-57）。
+
+    壊れた行・object でない行・curator 候補でない行は無視する（全体を止めない。R-10 と同じ思想）。
+    """
+    keys = set()
+    if not os.path.exists(path):
+        return keys
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                d = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            k = curator_candidate_key(d)
+            if k is not None:
+                keys.add(k)
+    return keys
+
+
 def append_curator_candidates(candidates: list[dict], kb_dir: str) -> int:
-    """改善候補を candidates.jsonl に追記する。"""
+    """改善候補のうち新規のものだけを candidates.jsonl に追記する。
+
+    v15.1 / C-57: 以前は無条件に追記しており、同じ retrospective を 2 回処理すると
+    同じ候補が 2 行ずつ溜まった（`extract_components.py` の C-54 と同じ欠陥パターンの
+    「別ファイルの兄弟関数」）。既存行と同じキー（`curator_candidate_key()`）の候補、
+    および同じバッチ内で既に採用したキーの候補はスキップする。新規が 0 件ならファイルを
+    開かずに 0 を返す（空ファイルを作らない）。
+
+    Returns:
+        実際に追記した件数。
+    """
     path = os.path.join(kb_dir, "candidates.jsonl")
     os.makedirs(kb_dir, exist_ok=True)
 
+    seen = load_existing_curator_keys(path)
+    new_candidates = []
+    for c in candidates:
+        k = curator_candidate_key(c)
+        if k is not None:
+            if k in seen:
+                continue
+            seen.add(k)   # バッチ内の重複も 1 件にする
+        new_candidates.append(c)
+
+    if not new_candidates:
+        return 0
+
     with open(path, "a", encoding="utf-8") as f:
-        for c in candidates:
+        for c in new_candidates:
             f.write(json.dumps(c, ensure_ascii=False) + "\n")
-    return len(candidates)
+    return len(new_candidates)
 
 
 def update_curator_memory(
@@ -299,7 +364,8 @@ def main():
 
     if candidates:
         count = append_curator_candidates(candidates, args.kb_dir)
-        print(f"Appended {count} candidates to candidates.jsonl")
+        print(f"Appended {count} candidates to candidates.jsonl "
+              f"({len(candidates) - count} duplicates skipped, C-57)")
 
         # サマリー表示
         for c in candidates:

@@ -10,6 +10,7 @@ project-root/
 ├── templates/               # Generation templates: team-roster.json, agents/*.md
 ├── CLAUDE.md                # Project spec (created by init-task)
 ├── metadata.json            # Machine-readable project state
+├── findings-register.md     # Deferred findings across phases (from templates/findings-register.md)
 ├── finalization-report.md   # Created by /finalize
 └── retrospective.md         # Created by /retrospective
 ```
@@ -27,7 +28,9 @@ project-root/
 | File | Created by | Updated by |
 |---|---|---|
 | `.metadata.json` (per phase) | Builder | Builder (revision), Validator (status) |
-| `.validation/report.md` | Validator | Validator (re-check) |
+| `.validation/report-round{R}.md` | Validator (one per round, never overwritten) | — |
+| `.validation/report.md` | Validator (copy of the latest round) | Validator (re-check) |
+| `.validation/expert-<agent>-round{R}.md` | Expert reviewer | — |
 | `metadata.json` (root) | init-task | run-phase, finalize |
 | `CLAUDE.md` | init-task | Phase completion, finalize |
 

@@ -1,6 +1,7 @@
 # Memory Policy — 知識ベースと Auto Memory の役割分担
 
-出典: `docs/requirements.md` R-25（C-16）。Phase 14 で新規作成。
+出典: SDD Toolkit 開発プロジェクト（v12→v15）の要件 R-25（C-16）。同プロジェクトの Phase 14 で新規作成。
+以下の「本プロジェクト」「本フェーズ時点の実測」は、その開発プロジェクトを指す。
 
 > **前提（C-16 の確認済み事項）**: `.claude/agents/knowledge-curator.md:6` は既に `memory: user` を
 > 宣言している。本ドキュメントは「新規導入」ではなく、**既に有効な仕組みの実態を実測し、
@@ -29,7 +30,7 @@
 
 - **実体（実測）**: `~/.claude/projects/<プロジェクトディレクトリのスラッグ>/memory/MEMORY.md`
   （目次。各ノートへのリンク一覧）+ 個別ノートファイル（例:
-  `~/.claude/projects/-home-aida-sdd-toolkit-v12-improve/memory/fix-cycle-stopping-rule.md`）。
+  `~/.claude/projects/<スラッグ>/memory/fix-cycle-stopping-rule.md`）。
   各ノートは frontmatter（`name` / `description` / `metadata.node_type: memory` /
   `metadata.type: feedback` / `metadata.originSessionId` / `metadata.modified`）を持ち、
   本文末尾に `[[関連ノート名]]` の wiki リンクを持つことがある

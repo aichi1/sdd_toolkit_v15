@@ -13,6 +13,7 @@ test_check_constitution.py: check_constitution.py の回帰テスト（R-12 / Ph
 import json
 import os
 import subprocess
+import sys
 import tempfile
 import unittest
 import importlib.util
@@ -603,6 +604,50 @@ class TestNoSilentSkip(unittest.TestCase):
             self.assertIn("fail", _statuses(r, "check_error"))
         finally:
             cc.CHECKS[11] = original
+
+
+class TestCliProfiles(unittest.TestCase):
+    """v15.1: `--article` 省略時は汎用の第2条のみ。未実装の条番号は実行エラー（exit 2）。"""
+
+    SCRIPT = str(Path(__file__).parent / "check_constitution.py")
+
+    def _run(self, *args):
+        with tempfile.TemporaryDirectory() as tmp:
+            p = subprocess.run([sys.executable, self.SCRIPT, "--project-dir", tmp, "--json", *args],
+                               capture_output=True, text=True)
+            return p.returncode, p.stdout
+
+    def _articles(self, out):
+        return sorted({r["article"] for r in json.loads(out)})
+
+    def test_default_runs_only_generic_article_2(self):
+        """既定は第2条と、条番号に依存しない改正手続きの検査（article 0）だけ。"""
+        _rc, out = self._run("--phase", "3")
+        self.assertEqual(self._articles(out), [0, 2])
+
+    def test_generic_profile_reports_unapproved_amendments(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            d = Path(tmp) / "docs"
+            d.mkdir()
+            (d / "constitution.md").write_text(
+                "## 改正履歴の追認状況\n\n| 改正 | 条 | 日付 | 承認 |\n|---|---|---|---|\n"
+                "| (1) | 第2条 | 2026-09-18 | 未承認 |\n", encoding="utf-8")
+            p = subprocess.run([sys.executable, self.SCRIPT, "--project-dir", tmp, "--json",
+                                "--phase", "3"], capture_output=True, text=True)
+            r = [x for x in json.loads(p.stdout) if x["check"] == "amendments_all_approved"]
+            self.assertEqual([x["status"] for x in r], ["fail"])
+
+    def test_profile_toolkit_runs_all_articles(self):
+        _rc, out = self._run("--phase", "3", "--profile", "toolkit")
+        self.assertEqual(self._articles(out), sorted(cc.CHECKS))
+
+    def test_negative_unimplemented_article_is_exit_2_not_ok(self):
+        rc, _out = self._run("--phase", "3", "--article", "1")
+        self.assertEqual(rc, 2)
+
+    def test_negative_non_integer_phase_is_exit_2(self):
+        rc, _out = self._run("--phase", "abc")
+        self.assertEqual(rc, 2)
 
 
 if __name__ == "__main__":
